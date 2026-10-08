@@ -103,7 +103,7 @@ cat > "$BUNDLE/Contents/Info.plist" << PLIST
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.productivity</string>
     <key>LSMinimumSystemVersion</key>
-    <string>14.0</string>
+    <string>26.0</string>
     <key>LSMultipleInstancesProhibited</key>
     <true/>
     <key>LSUIElement</key>

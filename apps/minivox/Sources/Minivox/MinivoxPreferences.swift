@@ -30,12 +30,23 @@ struct DictationShortcut: Equatable {
     let keyCode: UInt32
     let modifiers: UInt32
     let title: String
+    /// Only the right Command key triggers it, so the left-hand chord keeps
+    /// its usual meaning (⌘M still minimizes).
+    let rightCommandOnly: Bool
 
-    init(keyCode: UInt32, modifiers: UInt32, title: String) {
+    init(keyCode: UInt32, modifiers: UInt32, title: String, rightCommandOnly: Bool = false) {
         self.keyCode = keyCode
         self.modifiers = modifiers
         self.title = title
+        self.rightCommandOnly = rightCommandOnly && modifiers & UInt32(cmdKey) != 0
     }
+
+    static let rightCommandM = DictationShortcut(
+        keyCode: UInt32(kVK_ANSI_M),
+        modifiers: UInt32(cmdKey),
+        title: "Right ⌘M",
+        rightCommandOnly: true
+    )
 
     static let optionSpace = DictationShortcut(
         keyCode: UInt32(kVK_Space),
@@ -82,9 +93,15 @@ struct DictationShortcut: Equatable {
             return nil
         }
 
+        let deviceFlags = UInt(event.modifierFlags.rawValue)
+        let rightCommandOnly = flags.contains(.command)
+            && deviceFlags & RightCommandShortcutTap.rightCommandMask != 0
+            && deviceFlags & RightCommandShortcutTap.leftCommandMask == 0
+
         keyCode = UInt32(event.keyCode)
         modifiers = carbonModifiers
-        title = modifierTitle + keyTitle
+        self.rightCommandOnly = rightCommandOnly
+        title = (rightCommandOnly ? "Right " : "") + modifierTitle + keyTitle
     }
 
     private static func keyTitle(for event: NSEvent) -> String? {
@@ -143,11 +160,22 @@ struct DictationShortcut: Equatable {
     }
 }
 
+enum ShortcutRegistration: Equatable {
+    case registered
+    case taken
+    case needsAccessibility
+}
+
 @MainActor
 final class GlobalShortcutController {
     private var hotKey: EventHotKeyRef?
     private var eventHandler: EventHandlerRef?
+    private var rightCommandTap: RightCommandShortcutTap?
+    private var tapRetryTimer: Timer?
     private let action: @MainActor @Sendable () -> Void
+
+    /// Called when a right-⌘ shortcut that was waiting on Accessibility goes live.
+    var onDeferredRegistration: (@MainActor () -> Void)?
 
     init(action: @escaping @MainActor @Sendable () -> Void) {
         self.action = action
@@ -184,16 +212,24 @@ final class GlobalShortcutController {
         if let eventHandler {
             RemoveEventHandler(eventHandler)
         }
+        tapRetryTimer?.invalidate()
     }
 
     @discardableResult
-    func register(_ shortcut: DictationShortcut?) -> Bool {
+    func register(_ shortcut: DictationShortcut?) -> ShortcutRegistration {
         if let hotKey {
             UnregisterEventHotKey(hotKey)
             self.hotKey = nil
         }
+        rightCommandTap = nil
+        tapRetryTimer?.invalidate()
+        tapRetryTimer = nil
 
-        guard let shortcut else { return true }
+        guard let shortcut else { return .registered }
+
+        if shortcut.rightCommandOnly {
+            return registerRightCommand(shortcut)
+        }
 
         var reference: EventHotKeyRef?
         let identifier = EventHotKeyID(signature: 0x4D_56_4F_58, id: 1) // MVOX
@@ -206,12 +242,127 @@ final class GlobalShortcutController {
             &reference
         )
 
-        guard status == noErr else { return false }
+        guard status == noErr else { return .taken }
         hotKey = reference
-        return true
+        return .registered
+    }
+
+    /// Carbon hot keys can't tell left from right Command, so a right-⌘
+    /// shortcut is caught with an event tap, which needs Accessibility.
+    private func registerRightCommand(_ shortcut: DictationShortcut) -> ShortcutRegistration {
+        if let tap = RightCommandShortcutTap(shortcut: shortcut, action: { [weak self] in self?.performAction() }) {
+            rightCommandTap = tap
+            return .registered
+        }
+
+        let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary // kAXTrustedCheckOptionPrompt
+        _ = AXIsProcessTrustedWithOptions(options)
+
+        tapRetryTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self,
+                      let tap = RightCommandShortcutTap(shortcut: shortcut, action: { [weak self] in self?.performAction() })
+                else { return }
+                self.rightCommandTap = tap
+                self.tapRetryTimer?.invalidate()
+                self.tapRetryTimer = nil
+                self.onDeferredRegistration?()
+            }
+        }
+        return .needsAccessibility
     }
 
     private func performAction() {
         action()
+    }
+}
+
+/// Swallows one key chord pressed with the right Command key and lets every
+/// other event, including the same chord on the left Command key, through.
+@MainActor
+final class RightCommandShortcutTap {
+    nonisolated static let leftCommandMask: UInt = 0x08  // NX_DEVICELCMDKEYMASK
+    nonisolated static let rightCommandMask: UInt = 0x10 // NX_DEVICERCMDKEYMASK
+
+    private let keyCode: Int64
+    private let modifiers: CGEventFlags
+    private let action: @MainActor @Sendable () -> Void
+    // Set once in init; the tap callback runs on the main run loop.
+    nonisolated(unsafe) private var tap: CFMachPort?
+    private var source: CFRunLoopSource?
+
+    init?(shortcut: DictationShortcut, action: @escaping @MainActor @Sendable () -> Void) {
+        keyCode = Int64(shortcut.keyCode)
+        modifiers = Self.eventFlags(forCarbon: shortcut.modifiers)
+        self.action = action
+
+        let mask = CGEventMask(1 << CGEventType.keyDown.rawValue)
+        guard let tap = CGEvent.tapCreate(
+            tap: .cgSessionEventTap,
+            place: .headInsertEventTap,
+            options: .defaultTap,
+            eventsOfInterest: mask,
+            callback: { _, type, event, userInfo in
+                guard let userInfo else { return Unmanaged.passUnretained(event) }
+                let handler = Unmanaged<RightCommandShortcutTap>.fromOpaque(userInfo).takeUnretainedValue()
+                return handler.handle(type: type, event: event)
+            },
+            userInfo: Unmanaged.passUnretained(self).toOpaque()
+        ) else {
+            return nil
+        }
+
+        self.tap = tap
+        source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+        CGEvent.tapEnable(tap: tap, enable: true)
+    }
+
+    isolated deinit {
+        if let tap {
+            CGEvent.tapEnable(tap: tap, enable: false)
+            CFMachPortInvalidate(tap)
+        }
+        if let source {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
+        }
+    }
+
+    nonisolated private func handle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+        switch type {
+        case .tapDisabledByTimeout, .tapDisabledByUserInput:
+            if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
+            return Unmanaged.passUnretained(event)
+        case .keyDown:
+            break
+        default:
+            return Unmanaged.passUnretained(event)
+        }
+
+        let flags = event.flags
+        let relevant: CGEventFlags = [.maskCommand, .maskAlternate, .maskControl, .maskShift]
+        let device = UInt(flags.rawValue)
+
+        guard event.getIntegerValueField(.keyboardEventKeycode) == keyCode,
+              flags.intersection(relevant) == modifiers,
+              device & Self.rightCommandMask != 0,
+              device & Self.leftCommandMask == 0 else {
+            return Unmanaged.passUnretained(event)
+        }
+
+        if event.getIntegerValueField(.keyboardEventAutorepeat) == 0 {
+            let action = action
+            MainActor.assumeIsolated { action() }
+        }
+        return nil
+    }
+
+    private static func eventFlags(forCarbon modifiers: UInt32) -> CGEventFlags {
+        var flags: CGEventFlags = []
+        if modifiers & UInt32(cmdKey) != 0 { flags.insert(.maskCommand) }
+        if modifiers & UInt32(optionKey) != 0 { flags.insert(.maskAlternate) }
+        if modifiers & UInt32(controlKey) != 0 { flags.insert(.maskControl) }
+        if modifiers & UInt32(shiftKey) != 0 { flags.insert(.maskShift) }
+        return flags
     }
 }

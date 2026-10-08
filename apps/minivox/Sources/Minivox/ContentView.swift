@@ -159,7 +159,7 @@ struct ContentView: View {
                         .strokeBorder(palette.border, lineWidth: 0.5)
                         .frame(width: 35, height: 35)
 
-                    if model.isWorking || model.isWarmingASR {
+                    if !model.isRecording && (model.isWorking || model.isWarmingASR) {
                         ProgressView()
                             .controlSize(.small)
                             .tint(palette.accent)
@@ -172,7 +172,7 @@ struct ContentView: View {
                 .frame(width: 48, height: 48)
             }
             .buttonStyle(.plain)
-            .disabled(model.isWorking || model.isWarmingASR)
+            .disabled(!model.isRecording && (model.isWorking || model.isWarmingASR))
             .keyboardShortcut(.space, modifiers: [])
             .help(model.isRecording ? "Finish dictation" : "Start dictation")
 

@@ -1094,6 +1094,13 @@ export function minivoxReleaseDownloadURL(version = CLI_VERSION): string {
   return `https://github.com/arach/vox/releases/download/v${version}/Minivox.dmg`;
 }
 
+export const MINIVOX_MINIMUM_MACOS_MAJOR = 26;
+
+export function minivoxSupportsMacOSVersion(productVersion: string): boolean {
+  const major = Number.parseInt(productVersion.trim().split(".")[0] ?? "", 10);
+  return Number.isFinite(major) && major >= MINIVOX_MINIMUM_MACOS_MAJOR;
+}
+
 export function parseMinivoxInstallOptions(args: string[]): MinivoxInstallOptions {
   const known = new Set(["--user", "--no-launch", "--quiet", "-q", "--verbose"]);
   const unknown = args.find((arg) => !known.has(arg));
@@ -1120,8 +1127,8 @@ export function minivoxPostInstallInstructions(launched: boolean): string[] {
     "",
     "Use Minivox:",
     "  1. Put the text cursor where you want your dictation.",
-    "  2. Press ⌥Space to start. Allow microphone access if asked.",
-    "  3. Press ⌥Space again to stop. Minivox copies the text and pastes it when Accessibility access is enabled.",
+    "  2. Press Right ⌘M to start. Allow microphone and Accessibility access if asked.",
+    "  3. Press Right ⌘M again to stop. Minivox copies the text and pastes it when Accessibility access is enabled.",
     "",
     "Change the shortcut or microphone: minivox settings",
   ];
@@ -1201,8 +1208,11 @@ async function handleUninstall(target: string | undefined, args: string[]): Prom
 }
 
 async function installMinivox(options: MinivoxInstallOptions): Promise<void> {
-  if (process.platform !== "darwin") {
-    throw new Error("Minivox requires macOS 14 or newer.");
+  const productVersion = process.platform === "darwin"
+    ? spawnSync("sw_vers", ["-productVersion"], { encoding: "utf8" }).stdout ?? ""
+    : "";
+  if (!minivoxSupportsMacOSVersion(productVersion)) {
+    throw new Error(`Minivox requires macOS ${MINIVOX_MINIMUM_MACOS_MAJOR} or newer.`);
   }
 
   const applicationsDirectory = resolveMinivoxApplicationsDirectory(options.user);

@@ -238,8 +238,8 @@ export default function MinivoxPage() {
               <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted">After installation</p>
               <ol className="mt-3 space-y-2 text-[14px] leading-6 text-secondary">
                 <li><span className="mr-2 font-mono text-accent">01</span>Put the text cursor where you want your dictation.</li>
-                <li><span className="mr-2 font-mono text-accent">02</span>Press <span className="font-mono text-ink">⌥Space</span> to start, then allow microphone access.</li>
-                <li><span className="mr-2 font-mono text-accent">03</span>Press <span className="font-mono text-ink">⌥Space</span> again to stop. Minivox copies the text and pastes it when Accessibility access is enabled.</li>
+                <li><span className="mr-2 font-mono text-accent">02</span>Press <span className="font-mono text-ink">Right ⌘M</span> to start, then allow microphone and Accessibility access.</li>
+                <li><span className="mr-2 font-mono text-accent">03</span>Press <span className="font-mono text-ink">Right ⌘M</span> again to stop. Minivox copies the text and pastes it when Accessibility access is enabled.</li>
               </ol>
               <p className="mt-3 text-[12px] leading-5 text-muted">
                 The first dictation may download Parakeet. Open <span className="font-mono text-ink">minivox settings</span> to change the shortcut or microphone.

@@ -52,7 +52,7 @@ Minivox is the small, single-purpose dictation app. Install it without adding an
 npx -y @voxd/cli@latest install mini
 ```
 
-The installer opens Minivox automatically. Look for the waveform in the menu bar. Put the cursor where you want text, press **⌥Space** to start dictating, then press **⌥Space** again to stop. The first use asks for microphone access, and the first dictation may download Parakeet. Minivox always copies the result; grant Accessibility access when prompted if you also want it pasted automatically.
+The installer opens Minivox automatically. Look for the waveform in the menu bar. Put the cursor where you want text, press **Right ⌘M** to start dictating, then press **Right ⌘M** again to stop. The first use asks for microphone access, and the first dictation may download Parakeet. Minivox always copies the result; grant Accessibility access when prompted if you also want it pasted automatically.
 
 The installer adds `minivox` under `~/.local/bin`. Use `minivox settings` to change the shortcut or microphone. Use `--quiet` for errors-only output or `--verbose` to include Apple verification and disk-image details.
 
