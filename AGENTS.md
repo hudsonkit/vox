@@ -6,6 +6,7 @@
 
 - Always solve root cause before looking for workarounds and quick fixes.
 - Swift owns the embeddable Apple engine surface and the companion transport surface.
+- Rust is the default for new external ASR provider implementations. Use `providers/vox-provider` for the process protocol and `providers/example` as the starter; keep install and preload explicit.
 - Bun/Node clients and the CLI communicate with `voxd` only in companion mode.
 - Warm-up is a public capability. Do not hide it in launch side effects or opaque helpers.
 - Preserve `clientId`, `route`, `modelId`, and `voiceId` where applicable in telemetry.
@@ -37,6 +38,7 @@ Do not put `voxd`, `@voxd/sdk`, or `@voxd/client` inside an Apple app unless the
 | Companion TypeScript SDK | `packages/client/src/` |
 | Browser client | `packages/web-client/src/` |
 | CLI | `packages/cli/src/index.ts` |
+| Rust provider protocol and adapters | `providers/` |
 | Human docs | `docs/*.md` |
 | Compact agent briefs | `docs/agent/*.agent.md` |
 | Marketing site | `site/` |
@@ -80,6 +82,8 @@ bun install
 bun run build
 bun run test
 bun run test:e2e
+bun run test:providers
+bun run build:providers
 bun run site:dev
 bun run site:build
 bun run docs:generate

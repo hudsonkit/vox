@@ -69,6 +69,30 @@ vox plugins remove mlx-vlm
 
 Gemma 4 E2B (`gemma-4-e2b-it`) uses plugin `mlx-vlm`. The bundled runner speaks the provider protocol and calls mlx-vlm when `VOX_MLX_VLM_PYTHON` or `python3` has that package. Without mlx-vlm the plugin stays installed and reports `available=false`.
 
-Plugin launchers are allowlisted: `node`, `bun`, `npx`, `bunx`, `uv`, `uvx`, `python3`. Bundled plugins do not take their command from the site JSON.
+Plugin launchers are allowlisted: `node`, `bun`, `npx`, `bunx`, `uv`, `uvx`, `python3`, `python`. Native bundles can also launch a compiled executable inside their own plugin directory. Bundled plugins take their command from the CLI's bundle manifest. Installation writes an absolute command path so the daemon can start it without a shell.
+
+### Cactus Whistle
+
+Whistle runs in an optional Rust provider process with Cactus's prebuilt Needle CPU runtime on Apple Silicon. The compiled provider ships with the CLI and needs no Python, `uv`, or Rust installation. It loads only the speech model:
+
+```bash
+vox plugins install whistle
+# restart voxd
+vox models install whistle
+vox models preload whistle
+vox transcribe file --model whistle --metrics --timestamps /path/to/audio.wav
+```
+
+Plugin registration copies the compiled provider and writes `provider.json`. `models install` downloads the speech weights and native runtime. `models preload` loads the installed model into the persistent helper. Model listing does not download weights or load the model.
+
+Assets are stored under `VOX_HOME/models/whistle` (default `~/.vox/models/whistle`). Transcription can load installed weights on its first call; `models preload` moves that work out of the transcription request. Neither operation downloads missing model assets.
+
+Set `VOX_WHISTLE_LANGUAGE` in the provider's `env` to `en`, `de`, `fr`, `es`, `it`, `nl`, or `pl` to select a language. An unset value uses language detection. `VOX_WHISTLE_KEYWORDS` accepts comma-separated words for keyword biasing. Restart `voxd` after changing provider environment values.
+
+The adapter accepts audio files up to 30 seconds and returns finalized text with word timestamps and confidence. Audio decoding and 16 kHz mono conversion use Symphonia and Rubato. This provider exposes file transcription; its catalog entry keeps `liveTranscription=false`.
+
+Whistle's runtime has one shared model state per process. The helper accepts one operation at a time and returns a busy error for overlapping requests. After an error, callers can retry on the same process. Removing the plugin unregisters the helper; downloaded model assets remain available for reinstallation.
+
+The [Whistle model card](https://huggingface.co/Cactus-Compute/whistle) documents the supported languages and model. The [Needle repository](https://github.com/cactus-compute/needle) documents the native runtime; the Rust adapter calls its C interface directly. Model installation downloads the pinned weights and runtime binary, checks their hashes, and keeps them for offline inference.
 
 See the [Provider Protocol](./providers.md) for the stdin/stdout contract a plugin must implement.

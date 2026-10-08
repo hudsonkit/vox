@@ -1,0 +1,4 @@
+{
+  "executables": {"darwin-arm64": "bin/darwin-arm64/vox-whistle"},
+  "env": {"VOX_PROVIDER_CALL_TIMEOUT_SECONDS": "300"}
+}

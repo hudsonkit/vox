@@ -20,4 +20,11 @@
 - plugin store: `~/.vox/plugins/<id>/provider.json`
 - `voxd` loads installed plugins at start
 - Gemma 4 E2B: model `gemma-4-e2b-it`, plugin `mlx-vlm`
-- plugin launchers: `node`, `bun`, `npx`, `bunx`, `uv`, `uvx`, `python3`
+- plugin launchers: `node`, `bun`, `npx`, `bunx`, `uv`, `uvx`, `python3`, `python`; install resolves launchers to absolute paths
+- Whistle: model/plugin `whistle`, family `cactus-whistle`, optional Rust provider using prebuilt Needle CPU runtime; no Needle text model
+- Whistle setup: bundled Apple Silicon executable; `vox plugins install whistle`, restart voxd, `vox models install whistle`, `vox models preload whistle`
+- provider runs without Python/uv/Rust installed; only model install downloads weights/runtime; model listing does not load weights
+- Whistle: file ASR up to 30 seconds, word timestamps/confidence, one operation per process; overlapping calls return busy
+- Whistle adapter uses Symphonia/Rubato for audio conversion; `liveTranscription=false`
+- Whistle assets: `VOX_HOME/models/whistle`; transcribe can cold-load installed assets but cannot download them
+- Whistle env: `VOX_WHISTLE_LANGUAGE` (en/de/fr/es/it/nl/pl, unset auto), `VOX_WHISTLE_KEYWORDS` (comma-separated)
