@@ -5,7 +5,7 @@ description: Install Vox Companion, verify runtime health, and exercise transcri
 
 ## Prerequisites
 
-- macOS 14+ or iOS 17+ for direct Swift transcription embedding; macOS 14+ for Minivox; macOS 26+ for the Vox menu app
+- macOS 14+ or iOS 17+ for direct Swift transcription embedding; macOS 26+ for Minivox and the Vox menu app
 - Node 22+
 - Vox Companion installed from the DMG, or `voxd` available at `~/.vox/bin/voxd`
 - Swift 6.2+ only if you plan to build Vox from a repo checkout

@@ -168,6 +168,12 @@ public actor MicrophoneFileRecorder {
         session.commitConfiguration()
 
         let fileType = preferredOutputFileType(for: output)
+        // Pin the file format. Left unset, the writer adopts the first buffer's
+        // format and stops ("Recording Stopped") if the device stream later
+        // switches format, leaving a fraction of a second of audio.
+        if fileType == .wav {
+            output.audioSettings = Self.speechWAVSettings
+        }
         let prefix = normalizedFilePrefix(filePrefix)
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("\(prefix)-\(UUID().uuidString)")
@@ -216,6 +222,16 @@ public actor MicrophoneFileRecorder {
         }
     }
 
+    /// Current input loudness, 0 (silence) to 1, for level meters.
+    /// Nil when no recording is active.
+    public func inputLevel() -> Float? {
+        guard let output else { return nil }
+        let channels = output.connections.flatMap(\.audioChannels)
+        guard !channels.isEmpty else { return nil }
+        let decibels = channels.map(\.averagePowerLevel).max() ?? -160
+        return max(0, min(1, (decibels + 50) / 50))
+    }
+
     public func cancel() {
         let current = currentURL
         output?.stopRecording()
@@ -251,6 +267,16 @@ public actor MicrophoneFileRecorder {
             throw MicrophoneCaptureError.permissionUnavailable
         }
     }
+
+    static var speechWAVSettings: [String: Any] { [
+        AVFormatIDKey: kAudioFormatLinearPCM,
+        AVSampleRateKey: 16_000,
+        AVNumberOfChannelsKey: 1,
+        AVLinearPCMBitDepthKey: 16,
+        AVLinearPCMIsFloatKey: false,
+        AVLinearPCMIsBigEndianKey: false,
+        AVLinearPCMIsNonInterleaved: false,
+    ] }
 
     private func preferredOutputFileType(for output: AVCaptureAudioFileOutput) -> AVFileType {
         let fileTypes = AVCaptureAudioFileOutput.availableOutputFileTypes()
@@ -367,6 +393,8 @@ public actor MicrophoneFileRecorder {
     public func stop() async throws -> URL {
         throw MicrophoneCaptureError.noActiveRecording
     }
+
+    public func inputLevel() -> Float? { nil }
 
     public func cancel() {}
 

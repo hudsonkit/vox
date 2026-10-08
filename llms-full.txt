@@ -73,7 +73,7 @@ npx -y @voxd/cli@latest install mini
 brew install --cask arach/vox/minivox
 ```
 
-The installer opens Minivox automatically. Look for the waveform in the menu bar, put the text cursor where you want your dictation, and press **⌥Space** to start. Allow microphone access if asked, then press **⌥Space** again to stop. Minivox copies the result and pastes it when Accessibility access is enabled. The first dictation may download Parakeet.
+The installer opens Minivox automatically. Look for the waveform in the menu bar, put the text cursor where you want your dictation, and press **Right ⌘M** to start. Allow microphone access if asked, then press **Right ⌘M** again to stop. Minivox copies the result and pastes it when Accessibility access is enabled. The first dictation may download Parakeet.
 
 Both installers expose a `minivox` command. Run `minivox settings` to change the shortcut or microphone, or `minivox quit` to stop the menu-bar app. The npm installer accepts `--quiet` and `--verbose` to control setup output.
 
@@ -106,7 +106,7 @@ Source: /docs/quickstart
 
 ## Prerequisites
 
-- macOS 14+ or iOS 17+ for direct Swift transcription embedding; macOS 14+ for Minivox; macOS 26+ for the Vox menu app
+- macOS 14+ or iOS 17+ for direct Swift transcription embedding; macOS 26+ for Minivox and the Vox menu app
 - Node 22+
 - Vox Companion installed from the DMG, or `voxd` available at `~/.vox/bin/voxd`
 - Swift 6.2+ only if you plan to build Vox from a repo checkout
@@ -212,7 +212,7 @@ There is not yet a polished one-object Apple SDK facade. Agents should usually c
 ## Package setup
 
 `VoxCore` and `VoxEngine` support direct transcription embedding on macOS 14+
-and iOS 17+. Minivox uses that same direct path on macOS 14+.
+and iOS 17+. Minivox uses that same direct path and requires macOS 26+.
 
 For a sibling repo during local development, prefer a local SwiftPM dependency:
 
@@ -2537,7 +2537,7 @@ Source: docs/agent/overview.agent.md
 
 # Vox Facts
 
-- platforms: `macOS 14+` / `iOS 17+` for Swift transcription embedding; `macOS 14+` for Minivox; `macOS 26+` for the Hudson menu app
+- platforms: `macOS 14+` / `iOS 17+` for Swift transcription embedding; `macOS 26+` for Minivox and the Hudson menu app
 - deployment modes:
   - embed mode: Swift packages inside the app process
   - companion mode: `voxd` for web, browser, and shared-process clients
@@ -2551,7 +2551,7 @@ Source: docs/agent/overview.agent.md
 - full companion app: `apps/vox/`
 - Minivox dictation app: `apps/minivox/`
 - Minivox install: `npx -y @voxd/cli@latest install mini` or `brew install --cask arach/vox/minivox`
-- Minivox first use: the installer launches the menu-bar app; put the cursor in a text field, press `⌥Space` to start, then press `⌥Space` again to stop and copy/paste the transcript
+- Minivox first use: the installer launches the menu-bar app; put the cursor in a text field, press `Right ⌘M` to start, then press `Right ⌘M` again to stop and copy/paste the transcript
 - Minivox command: `minivox`, `minivox settings`, `minivox quit`
 - Minivox npm install output: `--quiet` or `--verbose`
 - model focus: `parakeet:v3` for ASR, `parakeet:v2` for English-only TDT, `gpt-4o-mini-tts` for default TTS
@@ -2611,7 +2611,7 @@ Source: docs/agent/quickstart.agent.md
 # Quickstart Facts
 
 - Swift embed minimums: macOS 14+, iOS 17+
-- Minivox direct-embed dictation app: `apps/minivox/`, macOS 14+
+- Minivox direct-embed dictation app: `apps/minivox/`, macOS 26+
 - packaged Vox menu app requires macOS 26+
 - published CLI requires Node 22+
 - install CLI: `npm install -g @voxd/cli`

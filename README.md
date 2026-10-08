@@ -24,7 +24,7 @@ Apple apps can embed Vox directly. Bun and Node tools can connect to `voxd` over
 Requirements:
 
 - Apple Silicon; Intel Macs are not supported
-- macOS 14+ for the Swift transcription packages and Minivox; macOS 26+ for the Hudson menu app and Apple SpeechTranscriber
+- macOS 14+ for the Swift transcription packages; macOS 26+ for Minivox, the Hudson menu app and Apple SpeechTranscriber
 - Bun 1.2+
 - Node 22+
 - Swift 6.2+
@@ -89,8 +89,8 @@ npx -y @voxd/cli@latest install mini
 The installer opens Minivox automatically. Look for the waveform in the menu bar, then:
 
 1. Put the text cursor where you want your dictation.
-2. Press **⌥Space** to start and allow microphone access if asked.
-3. Press **⌥Space** again to stop. Minivox copies the result and pastes it when Accessibility access is enabled.
+2. Press **Right ⌘M** to start and allow microphone and Accessibility access if asked.
+3. Press **Right ⌘M** again to stop. Minivox copies the result and pastes it when Accessibility access is enabled.
 
 Run `minivox settings` to change the shortcut or microphone. The first dictation may download Parakeet.
 

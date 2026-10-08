@@ -19,8 +19,8 @@ npx -y @voxd/cli@latest install mini
 The installer opens Minivox automatically. Look for the waveform in the menu bar, then:
 
 1. Put the text cursor where you want your dictation.
-2. Press **⌥Space** to start and allow microphone access if asked.
-3. Press **⌥Space** again to stop. Minivox copies the text and pastes it when Accessibility access is enabled.
+2. Press **Right ⌘M** to start and allow microphone and Accessibility access if asked.
+3. Press **Right ⌘M** again to stop. Minivox copies the text and pastes it when Accessibility access is enabled.
 
 The first dictation may download Parakeet. Run `minivox settings` to change the shortcut or microphone.
 

@@ -149,7 +149,7 @@ export default function DownloadPage() {
                   One shortcut. One job<span className="text-accent">.</span>
                 </h2>
                 <p className="mt-5 max-w-lg text-[14px] leading-7 text-secondary">
-                  Vox Companion is the speech runtime for apps and tools. Minivox is the finished, single-purpose app: press a shortcut, dictate, and the text lands where you were typing.
+                  Vox Companion is the speech runtime for apps and tools. Minivox is the smallest possible dictation thing, open source and hackable: press a shortcut, dictate, and the text lands where you were typing.
                 </p>
 
                 <div className="mt-6 flex flex-wrap gap-2 font-mono text-[9px] uppercase tracking-[0.12em] text-muted">
@@ -220,7 +220,7 @@ export default function DownloadPage() {
                   <CopyCommand command="brew install --cask arach/vox/minivox" />
                 </div>
                 <p className="text-[11px] leading-5 text-secondary">
-                  After installation, use the waveform in the menu bar: put your cursor in any text field, press <span className="font-mono text-ink">⌥Space</span> to start, then press it again to transcribe and paste.
+                  After installation, use the waveform in the menu bar: put your cursor in any text field, press <span className="font-mono text-ink">Right ⌘M</span> to start, then press it again to transcribe and paste.
                 </p>
                 <p className="font-mono text-[9px] text-muted">The first use asks for microphone access. npm setup also accepts --quiet or --verbose.</p>
               </div>

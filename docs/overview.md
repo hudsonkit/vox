@@ -68,7 +68,7 @@ npx -y @voxd/cli@latest install mini
 brew install --cask arach/vox/minivox
 ```
 
-The installer opens Minivox automatically. Look for the waveform in the menu bar, put the text cursor where you want your dictation, and press **⌥Space** to start. Allow microphone access if asked, then press **⌥Space** again to stop. Minivox copies the result and pastes it when Accessibility access is enabled. The first dictation may download Parakeet.
+The installer opens Minivox automatically. Look for the waveform in the menu bar, put the text cursor where you want your dictation, and press **Right ⌘M** to start. Allow microphone access if asked, then press **Right ⌘M** again to stop. Minivox copies the result and pastes it when Accessibility access is enabled. The first dictation may download Parakeet.
 
 Both installers expose a `minivox` command. Run `minivox settings` to change the shortcut or microphone, or `minivox quit` to stop the menu-bar app. The npm installer accepts `--quiet` and `--verbose` to control setup output.
 

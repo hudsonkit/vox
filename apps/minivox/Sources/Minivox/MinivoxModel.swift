@@ -14,18 +14,35 @@ private struct RecordedClip: Sendable {
     let duration: TimeInterval
 }
 
+enum DictationPhase: Equatable {
+    case idle
+    case listening(since: Date)
+    case transcribing
+    case finished(DictationOutcome)
+}
+
+enum DictationOutcome: Equatable {
+    case pasted
+    case copied
+    case noSpeech
+    case failed
+}
+
 @MainActor
 final class MinivoxModel: ObservableObject {
     private static let legacyShortcutDefaultsKey = "minivox.dictationShortcut"
     private static let shortcutKeyCodeDefaultsKey = "minivox.dictationShortcut.keyCode"
     private static let shortcutModifiersDefaultsKey = "minivox.dictationShortcut.modifiers"
     private static let shortcutTitleDefaultsKey = "minivox.dictationShortcut.title"
+    private static let shortcutRightCommandDefaultsKey = "minivox.dictationShortcut.rightCommand"
+    private static let shortcutAccessibilityMessage = "Allow Minivox in Privacy & Security › Accessibility to use Right ⌘ shortcuts."
     static let autoPasteDefaultsKey = "minivox.autoPaste"
     static let warmUpOnLaunchDefaultsKey = "minivox.warmUpOnLaunch"
 
     @Published var didLoad = false
     @Published var isRecording = false
-    @Published var isWorking = false
+    @Published private(set) var isWorking = false
+    @Published private(set) var dictationPhase: DictationPhase = .idle
     @Published var isWarmingASR = false
     @Published var asrReadyInMemory = false
     @Published var asrStateTitle = "Checking Parakeet"
@@ -52,6 +69,11 @@ final class MinivoxModel: ObservableObject {
     private var shortcutController: GlobalShortcutController?
     private var shortcutEventMonitor: Any?
     private var recordingStartedAt: Date?
+    private var isStartingRecording = false
+    private var activeOperations = 0 {
+        didSet { isWorking = activeOperations > 0 }
+    }
+    private var phaseResetTask: Task<Void, Never>?
 
     init() {
         UserDefaults.standard.register(defaults: [Self.autoPasteDefaultsKey: true])
@@ -60,6 +82,10 @@ final class MinivoxModel: ObservableObject {
 
         shortcutController = GlobalShortcutController { [weak self] in
             self?.toggleRecording()
+        }
+        shortcutController?.onDeferredRegistration = { [weak self] in
+            guard let self, self.statusMessage == Self.shortcutAccessibilityMessage else { return }
+            self.statusMessage = ""
         }
         applyShortcut()
     }
@@ -87,6 +113,16 @@ final class MinivoxModel: ObservableObject {
         } else {
             Task { await beginRecording() }
         }
+    }
+
+    /// Stops listening and throws the recording away.
+    func cancelRecording() {
+        guard isRecording else { return }
+        isRecording = false
+        recordingStartedAt = nil
+        statusMessage = ""
+        Task { await recorder.cancel() }
+        setPhase(.idle)
     }
 
     func warmASR() {
@@ -240,15 +276,25 @@ final class MinivoxModel: ObservableObject {
         recordingStartedAt = nil
         statusMessage = ""
 
+        setPhase(.transcribing)
+
+        // Stopping the microphone must never wait behind other work, such as a warm-up.
         Task {
-            await runTask {
-                let url = try await self.recorder.stop()
+            activeOperations += 1
+            defer { activeOperations -= 1 }
+
+            do {
+                let url = try await recorder.stop()
                 let clip = RecordedClip(
                     url: url,
                     duration: max(0, Date().timeIntervalSince(startedAt ?? Date()))
                 )
-                self.recordingDuration = clip.duration
-                try await self.transcribe(clip)
+                recordingDuration = clip.duration
+                try await transcribe(clip)
+            } catch {
+                lastErrorMessage = error.localizedDescription
+                statusMessage = error.localizedDescription
+                setPhase(.finished(.failed))
             }
         }
     }
@@ -258,7 +304,9 @@ final class MinivoxModel: ObservableObject {
             statusMessage = "Minivox is still getting ready."
             return
         }
-        guard !isRecording else { return }
+        guard !isRecording, !isStartingRecording else { return }
+        isStartingRecording = true
+        defer { isStartingRecording = false }
 
         refreshInputDevices()
         refreshMicrophoneAvailability()
@@ -271,8 +319,10 @@ final class MinivoxModel: ObservableObject {
                 preferredInputDeviceID: preferredInputDeviceId,
                 filePrefix: "minivox"
             )
-            recordingStartedAt = Date()
+            let startedAt = Date()
+            recordingStartedAt = startedAt
             isRecording = true
+            setPhase(.listening(since: startedAt))
             recordingDuration = 0
             transcript = ""
             transcriptionMetrics = nil
@@ -285,6 +335,7 @@ final class MinivoxModel: ObservableObject {
             refreshMicrophoneAvailability()
             lastErrorMessage = error.localizedDescription
             statusMessage = error.localizedDescription
+            setPhase(.finished(.failed))
         }
     }
 
@@ -303,6 +354,7 @@ final class MinivoxModel: ObservableObject {
 
         guard !text.isEmpty else {
             statusMessage = "No speech detected. Try once more."
+            setPhase(.finished(.noSpeech))
             return
         }
 
@@ -319,6 +371,24 @@ final class MinivoxModel: ObservableObject {
 
         copyTranscript(showConfirmation: false)
         await pasteTranscriptIfEnabled()
+        setPhase(.finished(didPaste ? .pasted : .copied))
+    }
+
+    /// Microphone loudness (0...1) while recording, for the notch meter.
+    func currentInputLevel() async -> Float {
+        await recorder.inputLevel() ?? 0
+    }
+
+    private func setPhase(_ phase: DictationPhase) {
+        phaseResetTask?.cancel()
+        dictationPhase = phase
+
+        guard case .finished = phase else { return }
+        phaseResetTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1.4))
+            guard !Task.isCancelled else { return }
+            self?.dictationPhase = .idle
+        }
     }
 
     private func copyTranscript(showConfirmation: Bool) {
@@ -452,8 +522,8 @@ final class MinivoxModel: ObservableObject {
 
     private func runTask(operation: @escaping @MainActor () async throws -> Void) async {
         guard !isWorking else { return }
-        isWorking = true
-        defer { isWorking = false }
+        activeOperations += 1
+        defer { activeOperations -= 1 }
 
         do {
             try await operation()
@@ -465,9 +535,13 @@ final class MinivoxModel: ObservableObject {
 
     private func applyShortcut() {
         guard let shortcutController else { return }
-        let registered = shortcutController.register(dictationShortcut)
-        if !registered {
+        switch shortcutController.register(dictationShortcut) {
+        case .registered:
+            break
+        case .taken:
             statusMessage = "That shortcut is already used by another app."
+        case .needsAccessibility:
+            statusMessage = Self.shortcutAccessibilityMessage
         }
     }
 
@@ -483,10 +557,12 @@ final class MinivoxModel: ObservableObject {
             defaults.set(Int(shortcut.keyCode), forKey: Self.shortcutKeyCodeDefaultsKey)
             defaults.set(Int(shortcut.modifiers), forKey: Self.shortcutModifiersDefaultsKey)
             defaults.set(shortcut.title, forKey: Self.shortcutTitleDefaultsKey)
+            defaults.set(shortcut.rightCommandOnly, forKey: Self.shortcutRightCommandDefaultsKey)
         } else {
             defaults.removeObject(forKey: Self.shortcutKeyCodeDefaultsKey)
             defaults.removeObject(forKey: Self.shortcutModifiersDefaultsKey)
             defaults.removeObject(forKey: Self.shortcutTitleDefaultsKey)
+            defaults.removeObject(forKey: Self.shortcutRightCommandDefaultsKey)
         }
 
         applyShortcut()
@@ -506,7 +582,8 @@ final class MinivoxModel: ObservableObject {
             return DictationShortcut(
                 keyCode: keyCode.uint32Value,
                 modifiers: modifiers.uint32Value,
-                title: title
+                title: title,
+                rightCommandOnly: defaults.bool(forKey: shortcutRightCommandDefaultsKey)
             )
         }
 
@@ -514,7 +591,7 @@ final class MinivoxModel: ObservableObject {
         case "controlSpace": return .controlSpace
         case "optionShiftSpace": return .optionShiftSpace
         case "off": return nil
-        default: return .optionSpace
+        default: return .rightCommandM
         }
     }
 

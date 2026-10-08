@@ -1,6 +1,6 @@
 # Vox Facts
 
-- platforms: `macOS 14+` / `iOS 17+` for Swift transcription embedding; `macOS 14+` for Minivox; `macOS 26+` for the Hudson menu app
+- platforms: `macOS 14+` / `iOS 17+` for Swift transcription embedding; `macOS 26+` for Minivox and the Hudson menu app
 - deployment modes:
   - embed mode: Swift packages inside the app process
   - companion mode: `voxd` for web, browser, and shared-process clients
@@ -14,7 +14,7 @@
 - full companion app: `apps/vox/`
 - Minivox dictation app: `apps/minivox/`
 - Minivox install: `npx -y @voxd/cli@latest install mini` or `brew install --cask arach/vox/minivox`
-- Minivox first use: the installer launches the menu-bar app; put the cursor in a text field, press `⌥Space` to start, then press `⌥Space` again to stop and copy/paste the transcript
+- Minivox first use: the installer launches the menu-bar app; put the cursor in a text field, press `Right ⌘M` to start, then press `Right ⌘M` again to stop and copy/paste the transcript
 - Minivox command: `minivox`, `minivox settings`, `minivox quit`
 - Minivox npm install output: `--quiet` or `--verbose`
 - model focus: `parakeet:v3` for ASR, `parakeet:v2` for English-only TDT, `gpt-4o-mini-tts` for default TTS

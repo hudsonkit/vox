@@ -6,11 +6,13 @@ import SwiftUI
 struct MinivoxApp: App {
     @StateObject private var model: MinivoxModel
     private let commandReceiver: MinivoxCommandReceiver
+    private let notch: MinivoxNotchController
 
     init() {
         let model = MinivoxModel()
         _model = StateObject(wrappedValue: model)
         commandReceiver = MinivoxCommandReceiver(model: model)
+        notch = MinivoxNotchController(model: model)
 
         NSApplication.shared.setActivationPolicy(.accessory)
 

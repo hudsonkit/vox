@@ -71,3 +71,29 @@ export function CopyCommandBlock({ command, label }: { command: string; label: s
     </div>
   );
 }
+
+export function CopyPrompt({ prompt, label }: { prompt: string; label: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const copy = async () => {
+    setCopied(await copyText(prompt));
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="border border-line-strong bg-canvas">
+      <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
+        <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted">{label}</span>
+        <button
+          onClick={copy}
+          aria-label={copied ? "Copied" : `Copy ${label}`}
+          className="inline-flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.12em] text-muted transition-colors hover:text-ink"
+        >
+          {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+          {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+      <p className="whitespace-pre-wrap break-words px-4 py-4 font-mono text-[12px] leading-6 text-ink">{prompt}</p>
+    </div>
+  );
+}

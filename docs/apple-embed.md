@@ -27,7 +27,7 @@ There is not yet a polished one-object Apple SDK facade. Agents should usually c
 ## Package setup
 
 `VoxCore` and `VoxEngine` support direct transcription embedding on macOS 14+
-and iOS 17+. Minivox uses that same direct path on macOS 14+.
+and iOS 17+. Minivox uses that same direct path and requires macOS 26+.
 
 For a sibling repo during local development, prefer a local SwiftPM dependency:
 

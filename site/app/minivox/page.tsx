@@ -3,7 +3,6 @@ import Link from "next/link";
 import {
   ArrowLeft,
   ArrowUpRight,
-  Check,
   Clipboard,
   Download,
   Github,
@@ -11,26 +10,42 @@ import {
   MousePointer2,
   Sparkles,
 } from "lucide-react";
-import { CopyCommand } from "../../components/copy-command";
+import { CopyCommand, CopyPrompt } from "../../components/copy-command";
+import { DictationIndicator } from "../../components/dictation-indicator";
 
 export const metadata: Metadata = {
-  title: "Minivox · Tiny local dictation",
-  description: "Minivox is a tiny macOS menu-bar app for fast, local dictation with Vox.",
+  title: "Minivox · The smallest possible dictation thing",
+  description: "Minivox is the smallest possible dictation thing: open source, hackable, and easy to embed in your own project.",
   openGraph: {
-    title: "Minivox · Tiny local dictation",
-    description: "Click, speak, stop. Minivox transcribes locally and copies the text.",
+    title: "Minivox · The smallest possible dictation thing",
+    description: "Open source and hackable. Tell your agents to embed it in your favorite project.",
     images: [{ url: "/og/minivox.png" }],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Minivox · Tiny local dictation",
-    description: "Click, speak, stop. Minivox transcribes locally and copies the text.",
+    title: "Minivox · The smallest possible dictation thing",
+    description: "Open source and hackable. Tell your agents to embed it in your favorite project.",
     images: ["/og/minivox.png"],
   },
 };
 
 const sourceUrl = "https://github.com/arach/vox/tree/main/apps/minivox";
 const downloadUrl = "https://github.com/arach/vox/releases/latest/download/Minivox.dmg";
+
+const embedPrompt = `Embed Minivox-style dictation in this project.
+
+Read the Minivox source at ${sourceUrl} and the Vox embed guide at https://voxd.cc/docs/apple-embed. Add the Vox Swift package, then wire one shortcut that records the microphone, transcribes on-device with Parakeet, and pastes the text where the cursor is. Keep it as small as Minivox.`;
+
+const sourceFiles = [
+  { file: "MinivoxModel.swift", role: "record, transcribe, paste" },
+  { file: "MinivoxNotch.swift", role: "the recording notch" },
+  { file: "MinivoxPreferences.swift", role: "shortcut and settings" },
+  { file: "ContentView.swift", role: "menu-bar popover" },
+  { file: "MinivoxMenuPages.swift", role: "history and settings pages" },
+  { file: "MinivoxCommandReceiver.swift", role: "commands from the CLI" },
+  { file: "MinivoxStyle.swift", role: "colors and type" },
+  { file: "MinivoxApp.swift", role: "app entry" },
+];
 
 const steps = [
   { idx: "01", icon: MousePointer2, title: "Click", body: "Open Minivox from the menu bar and tap the microphone." },
@@ -46,9 +61,9 @@ export default function MinivoxPage() {
           <span>Minivox</span>
           <span className="hidden items-center gap-2 text-secondary sm:inline-flex">
             <span aria-hidden="true" className="inline-block h-1.5 w-1.5 rounded-full bg-accent" />
-            one small job
+            open source
           </span>
-          <span>local dictation</span>
+          <span>hackable</span>
         </div>
       </div>
 
@@ -62,7 +77,7 @@ export default function MinivoxPage() {
           <nav aria-label="Minivox" className="flex items-center gap-1 font-mono text-[11px] uppercase tracking-[0.12em] text-muted">
             <Link href="/" className="hidden px-2.5 py-1.5 transition-colors hover:text-accent sm:inline-flex">Home</Link>
             <a href={downloadUrl} className="px-2.5 py-1.5 transition-colors hover:text-accent">Download</a>
-            <Link href="/models" className="px-2.5 py-1.5 transition-colors hover:text-accent">Models</Link>
+            <Link href="/models" className="hidden px-2.5 py-1.5 transition-colors hover:text-accent sm:inline-flex">Models</Link>
             <Link href="/docs/apple-embed" className="px-2.5 py-1.5 transition-colors hover:text-accent">Embed guide</Link>
             <Link href={sourceUrl} target="_blank" rel="noreferrer noopener" className="px-2.5 py-1.5 transition-colors hover:text-accent">Source</Link>
           </nav>
@@ -76,12 +91,12 @@ export default function MinivoxPage() {
               <ArrowLeft className="h-3 w-3" />
               Back to Vox
             </Link>
-            <p className="mt-9 font-mono text-[11px] uppercase tracking-[0.18em] text-muted">{"// tiny dictation"}</p>
-            <h1 className="mt-5 max-w-[12ch] text-[clamp(2.7rem,6vw,5.2rem)] font-medium leading-[0.98] tracking-[-0.05em] text-ink">
-              Say it. Minivox types it<span className="text-accent">.</span>
+            <p className="mt-9 font-mono text-[11px] uppercase tracking-[0.18em] text-muted">{"// minivox"}</p>
+            <h1 className="mt-5 max-w-[14ch] text-[clamp(2.5rem,5.4vw,4.8rem)] font-medium leading-[0.98] tracking-[-0.05em] text-ink">
+              The smallest possible dictation thing<span className="text-accent">.</span>
             </h1>
             <p className="mt-7 max-w-xl text-[16px] leading-8 text-secondary">
-              A tiny menu-bar app for quick, local dictation. Click, speak, and stop. Minivox turns your voice into text and copies it to the clipboard.
+              Open source and hackable. Press a shortcut, speak, and Minivox transcribes on your Mac and pastes the text. Use it as is, or tell your agents to embed it in your favorite project.
             </p>
 
             <div className="mt-9 flex flex-wrap items-center gap-3">
@@ -105,64 +120,56 @@ export default function MinivoxPage() {
                 href="/docs/apple-embed"
                 className="inline-flex h-11 items-center gap-2 rounded-sm border border-line-strong bg-panel px-5 font-mono text-[11px] uppercase tracking-[0.08em] text-ink transition-colors hover:text-accent"
               >
-                Build with Vox
+                Embed it
                 <ArrowUpRight className="h-3.5 w-3.5" />
               </Link>
             </div>
           </div>
 
-          <div className="mx-auto w-full max-w-[430px]">
-            <div className="mb-2 flex items-center justify-end gap-2 px-2 font-mono text-[10px] uppercase tracking-[0.12em] text-muted">
-              <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-line bg-panel text-accent">M</span>
-              menu bar
+          <DictationIndicator />
+        </div>
+      </section>
+
+      <section className="border-b border-line bg-panel">
+        <div className="mx-auto grid max-w-6xl gap-12 px-6 py-20 lg:grid-cols-[1fr_1.1fr]">
+          <div className="min-w-0">
+            <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted">{"// hand it to your agent"}</p>
+            <h2 className="mt-4 max-w-[20ch] text-[clamp(1.7rem,3vw,2.5rem)] font-semibold leading-tight tracking-[-0.03em] text-ink">
+              Tell your agents to embed it in your favorite project.
+            </h2>
+            <p className="mt-5 max-w-md text-[15px] leading-7 text-secondary">
+              Minivox is eight Swift files on top of Vox, small enough for an agent to read in one pass. Paste the prompt into Claude Code, Codex, or whatever you build with.
+            </p>
+            <div className="mt-8 border border-line bg-canvas">
+              <div className="flex items-center justify-between border-b border-line px-4 py-2.5 font-mono text-[10px] uppercase tracking-[0.14em] text-muted">
+                <span>apps/minivox/Sources</span>
+                <span>{sourceFiles.length} files</span>
+              </div>
+              <ul className="divide-y divide-line">
+                {sourceFiles.map(({ file, role }) => (
+                  <li key={file} className="flex items-center justify-between gap-4 px-4 py-2 font-mono text-[11px]">
+                    <span className="truncate text-ink">{file}</span>
+                    <span className="shrink-0 text-muted">{role}</span>
+                  </li>
+                ))}
+              </ul>
             </div>
-            <div className="overflow-hidden rounded-[22px] border border-line-strong bg-panel shadow-[0_28px_90px_rgba(0,0,0,0.32)]">
-              <div className="flex items-center gap-3 border-b border-line bg-canvas px-5 py-4">
-                <div className="grid h-9 w-9 place-items-center rounded-xl bg-accent text-canvas">
-                  <span className="font-mono text-sm font-semibold">M</span>
-                </div>
-                <div>
-                  <p className="text-[15px] font-semibold">Minivox</p>
-                  <p className="text-[11px] text-muted">tiny local dictation</p>
-                </div>
-                <span className="ml-auto inline-flex items-center gap-2 rounded-full border border-line px-3 py-1 font-mono text-[10px] text-muted">
-                  <span className="h-1.5 w-1.5 rounded-full bg-accent" /> ready
-                </span>
-              </div>
-
-              <div className="p-5">
-                <div className="rounded-[20px] border border-line bg-canvas px-5 py-6 text-center">
-                  <div className="mx-auto grid h-24 w-24 place-items-center rounded-full border-[7px] border-accent/60 bg-panel shadow-[0_0_50px_rgba(239,92,80,0.14)]">
-                    <Mic className="h-7 w-7 text-ink" strokeWidth={1.8} />
-                  </div>
-                  <p className="mt-4 text-sm font-semibold">Tap to dictate</p>
-                  <p className="mt-1 text-[11px] text-muted">Press Space or click the microphone.</p>
-                </div>
-
-                <div className="mt-4 rounded-[16px] border border-line bg-canvas p-4">
-                  <div className="flex items-center justify-between">
-                    <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-muted">Dictation</span>
-                    <span className="inline-flex items-center gap-1.5 font-mono text-[9px] uppercase tracking-[0.12em] text-accent">
-                      <Check className="h-3 w-3" /> copied
-                    </span>
-                  </div>
-                  <p className="mt-3 text-[13px] leading-6 text-secondary">Meet me outside the studio at half past three.</p>
-                  <div className="mt-4 flex gap-4 font-mono text-[9px] uppercase tracking-[0.1em] text-muted">
-                    <span>load 0ms</span><span>transcribe 127ms</span><span>total 142ms</span>
-                  </div>
-                </div>
-
-                <div className="mt-4 flex items-center justify-between px-1 font-mono text-[9px] uppercase tracking-[0.12em] text-muted">
-                  <span>Parakeet ready</span>
-                  <span>Microphone ready</span>
-                </div>
-              </div>
+          </div>
+          <div className="min-w-0 lg:pt-10">
+            <CopyPrompt label="Prompt for your agent" prompt={embedPrompt} />
+            <div className="mt-5 flex flex-wrap gap-4 font-mono text-[11px] uppercase tracking-[0.12em] text-muted">
+              <Link href={sourceUrl} target="_blank" rel="noreferrer noopener" className="inline-flex items-center gap-2 transition-colors hover:text-accent">
+                Read the source <ArrowUpRight className="h-3 w-3" />
+              </Link>
+              <Link href="/docs/apple-embed" className="inline-flex items-center gap-2 transition-colors hover:text-accent">
+                Apple embed guide <ArrowUpRight className="h-3 w-3" />
+              </Link>
             </div>
           </div>
         </div>
       </section>
 
-      <section className="border-b border-line bg-panel">
+      <section className="border-b border-line">
         <div className="mx-auto max-w-6xl px-6 py-20">
           <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted">{"// one small job"}</p>
           <h2 className="mt-4 max-w-[22ch] text-[clamp(1.7rem,3vw,2.5rem)] font-semibold leading-tight tracking-[-0.03em] text-ink">
@@ -184,15 +191,15 @@ export default function MinivoxPage() {
         </div>
       </section>
 
-      <section className="border-b border-line">
+      <section className="border-b border-line bg-panel">
         <div className="mx-auto grid max-w-6xl gap-10 px-6 py-20 lg:grid-cols-[0.9fr_1.1fr]">
           <div>
-            <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted">{"// tiny by design"}</p>
+            <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted">{"// small on purpose"}</p>
             <h2 className="mt-4 max-w-[18ch] text-[clamp(1.7rem,3vw,2.5rem)] font-semibold leading-tight tracking-[-0.03em] text-ink">
-              Small enough to stay out of your way.
+              Nothing to take apart before you start.
             </h2>
             <p className="mt-5 max-w-md text-[15px] leading-7 text-secondary">
-              Minivox lives in the menu bar, keeps model readiness visible, and disappears when you are done. It is a direct Vox embed with no daemon, browser bridge, reply engine, or speech-generation step.
+              Minivox embeds Vox directly: no daemon, browser bridge, reply engine, or speech-generation step. Fork it, change the shortcut or the notch, and it is still yours to read in an afternoon.
             </p>
           </div>
 
@@ -215,7 +222,7 @@ export default function MinivoxPage() {
         </div>
       </section>
 
-      <section className="border-b border-line bg-panel">
+      <section className="border-b border-line">
         <div className="mx-auto grid max-w-6xl gap-10 px-6 py-20 lg:grid-cols-[1fr_1.1fr] lg:items-center">
           <div>
             <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted">{"// run minivox"}</p>
@@ -223,14 +230,11 @@ export default function MinivoxPage() {
               Install, then dictate.
             </h2>
             <p className="mt-5 max-w-md text-[15px] leading-7 text-secondary">
-              npm and Homebrew install the same signed and notarized release. The installer opens Minivox automatically; look for its waveform in the menu bar.
+              One command installs the signed and notarized app and opens it; look for its waveform in the menu bar.
             </p>
           </div>
           <div>
-            <div className="space-y-3">
-              <CopyCommand command="npx -y @voxd/cli@latest install mini" />
-              <CopyCommand command="brew install --cask arach/vox/minivox" />
-            </div>
+            <CopyCommand command="bunx @voxd/cli@latest install mini" />
             <p className="mt-3 font-mono text-[10px] leading-5 text-muted">
               Installs the <span className="text-ink">minivox</span> command too. Add <span className="text-ink">--quiet</span> or <span className="text-ink">--verbose</span> to control setup output.
             </p>
@@ -238,8 +242,8 @@ export default function MinivoxPage() {
               <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted">After installation</p>
               <ol className="mt-3 space-y-2 text-[14px] leading-6 text-secondary">
                 <li><span className="mr-2 font-mono text-accent">01</span>Put the text cursor where you want your dictation.</li>
-                <li><span className="mr-2 font-mono text-accent">02</span>Press <span className="font-mono text-ink">⌥Space</span> to start, then allow microphone access.</li>
-                <li><span className="mr-2 font-mono text-accent">03</span>Press <span className="font-mono text-ink">⌥Space</span> again to stop. Minivox copies the text and pastes it when Accessibility access is enabled.</li>
+                <li><span className="mr-2 font-mono text-accent">02</span>Press <span className="font-mono text-ink">Right ⌘M</span> to start, then allow microphone and Accessibility access.</li>
+                <li><span className="mr-2 font-mono text-accent">03</span>Press <span className="font-mono text-ink">Right ⌘M</span> again to stop. Minivox copies the text and pastes it when Accessibility access is enabled.</li>
               </ol>
               <p className="mt-3 text-[12px] leading-5 text-muted">
                 The first dictation may download Parakeet. Open <span className="font-mono text-ink">minivox settings</span> to change the shortcut or microphone.
@@ -259,7 +263,7 @@ export default function MinivoxPage() {
 
       <footer>
         <div className="mx-auto flex max-w-6xl flex-col gap-4 px-6 py-10 font-mono text-[11px] uppercase tracking-[0.14em] text-muted sm:flex-row sm:items-center sm:justify-between">
-          <span>Minivox · tiny local dictation</span>
+          <span>Minivox · the smallest possible dictation thing</span>
           <div className="flex gap-5">
             <Link href="/" className="transition-colors hover:text-accent">/home</Link>
             <a href={downloadUrl} className="transition-colors hover:text-accent">/download</a>

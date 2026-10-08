@@ -6,6 +6,7 @@ import {
   installMinivoxCommand,
   minivoxPostInstallInstructions,
   minivoxReleaseDownloadURL,
+  minivoxSupportsMacOSVersion,
   parseMinivoxInstallOptions,
   removeMinivoxCommand,
   resolveMinivoxCommandDirectory,
@@ -34,6 +35,13 @@ describe("Minivox installer", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it("requires macOS 26 or newer", () => {
+    expect(minivoxSupportsMacOSVersion("26.0")).toBe(true);
+    expect(minivoxSupportsMacOSVersion("27.0.1\n")).toBe(true);
+    expect(minivoxSupportsMacOSVersion("15.6")).toBe(false);
+    expect(minivoxSupportsMacOSVersion("")).toBe(false);
+  });
+
   it("downloads the release matching the CLI version", () => {
     expect(minivoxReleaseDownloadURL("0.4.0")).toBe(
       "https://github.com/arach/vox/releases/download/v0.4.0/Minivox.dmg",
@@ -59,8 +67,8 @@ describe("Minivox installer", () => {
   it("explains the first dictation after installation", () => {
     const launched = minivoxPostInstallInstructions(true).join("\n");
     expect(launched).toContain("running in your menu bar");
-    expect(launched).toContain("⌥Space to start");
-    expect(launched).toContain("⌥Space again to stop");
+    expect(launched).toContain("Right ⌘M to start");
+    expect(launched).toContain("Right ⌘M again to stop");
     expect(launched).toContain("minivox settings");
 
     expect(minivoxPostInstallInstructions(false)[0]).toContain("open Minivox");
