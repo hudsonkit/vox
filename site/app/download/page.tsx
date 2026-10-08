@@ -149,7 +149,7 @@ export default function DownloadPage() {
                   One shortcut. One job<span className="text-accent">.</span>
                 </h2>
                 <p className="mt-5 max-w-lg text-[14px] leading-7 text-secondary">
-                  Vox Companion is the speech runtime for apps and tools. Minivox is the finished, single-purpose app: press a shortcut, dictate, and the text lands where you were typing.
+                  Vox Companion is the speech runtime for apps and tools. Minivox is the smallest possible dictation thing, open source and hackable: press a shortcut, dictate, and the text lands where you were typing.
                 </p>
 
                 <div className="mt-6 flex flex-wrap gap-2 font-mono text-[9px] uppercase tracking-[0.12em] text-muted">

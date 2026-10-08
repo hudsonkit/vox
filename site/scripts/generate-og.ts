@@ -584,7 +584,7 @@ function renderMinivoxTemplate() {
 
       h1 {
         margin: 20px 0 0;
-        font-size: 88px;
+        font-size: 74px;
         font-weight: 500;
         line-height: 0.94;
         letter-spacing: -0.06em;
@@ -816,9 +816,9 @@ function renderMinivoxTemplate() {
     <div class="frame">
       <div class="copy">
         <div class="brand"><span class="brand-mark"></span>Minivox / macOS</div>
-        <div class="eyebrow">// local dictation</div>
-        <h1>Minimalist<br />voice app<span>.</span></h1>
-        <div class="description">Speak here. Paste anywhere.</div>
+        <div class="eyebrow">// open source · hackable</div>
+        <h1>Smallest possible<br />dictation thing<span>.</span></h1>
+        <div class="description">Tell your agents to embed it.</div>
         <div class="url">voxd.cc/minivox</div>
       </div>
 

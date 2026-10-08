@@ -211,17 +211,20 @@ export default function Home() {
           <div>
             <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted">{"// minivox"}</p>
             <h2 className="mt-4 max-w-[22ch] text-[clamp(1.5rem,2.6vw,2rem)] font-semibold leading-tight tracking-[-0.02em] text-ink">
-              Minivox is tiny, fast dictation from the menu bar.
+              Minivox is the smallest possible dictation thing.
             </h2>
             <p className="mt-4 max-w-md text-[15px] leading-7 text-secondary">
-              Click the microphone, speak, and stop. Minivox transcribes locally with Parakeet and copies the finished text to your clipboard.
+              Open source and hackable. Press a shortcut, speak, and Minivox transcribes locally with Parakeet and pastes the text.
             </p>
             <p className="mt-4 max-w-md text-[14px] leading-7 text-secondary">
-              It embeds Vox directly in one small Swift app—no daemon, browser bridge, reply engine, or extra steps.
+              Tell your agents to embed it in your favorite project. It is a few Swift files on Vox, with no daemon or browser bridge.
             </p>
             <div className="mt-7 flex flex-wrap items-center gap-3 font-mono text-[11px] uppercase tracking-[0.14em] text-muted">
               <span className="inline-flex items-center gap-2 rounded-sm border border-line-strong bg-canvas px-3 py-1.5">
                 <span aria-hidden="true" className="inline-block h-1.5 w-1.5 rounded-full bg-accent" />
+                Open source
+              </span>
+              <span className="inline-flex items-center gap-2 rounded-sm border border-line-strong bg-canvas px-3 py-1.5">
                 Parakeet
               </span>
               <span className="inline-flex items-center gap-2 rounded-sm border border-line-strong bg-canvas px-3 py-1.5">
