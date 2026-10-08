@@ -1,7 +1,18 @@
 {
   "version": 2,
-  "updatedAt": "2026-09-01",
+  "updatedAt": "2026-10-08",
   "plugins": [
+    {
+      "id": "whistle",
+      "kind": "asr",
+      "name": "Cactus Whistle",
+      "status": "ready",
+      "install": {
+        "kind": "bundle",
+        "id": "whistle"
+      },
+      "notes": "Optional Rust CPU speech provider for Apple Silicon. Register with `vox plugins install whistle`, restart voxd, then run `vox models install whistle` and `vox models preload whistle`."
+    },
     {
       "id": "mlx-vlm",
       "kind": "asr",
@@ -15,6 +26,30 @@
     }
   ],
   "models": [
+    {
+      "id": "whistle",
+      "kind": "asr",
+      "family": "cactus-whistle",
+      "name": "Cactus Whistle",
+      "vendor": "cactus",
+      "runtime": "needle-cpu",
+      "status": "plugin",
+      "plugin": "whistle",
+      "languages": "English, German, French, Spanish, Italian, Dutch, Polish",
+      "notes": "Optional separate-process CPU provider with word timings. File transcription up to 30 seconds; install and warm-up are explicit. Uses Cactus's prebuilt Needle runtime.",
+      "platforms": ["macOS 14+"],
+      "architectures": ["arm64"],
+      "capabilities": {
+        "fileTranscription": true,
+        "liveTranscription": false,
+        "onDevice": true,
+        "wordTimestamps": true
+      },
+      "source": {
+        "type": "huggingface",
+        "repo": "Cactus-Compute/whistle"
+      }
+    },
     {
       "id": "parakeet:v3",
       "kind": "asr",

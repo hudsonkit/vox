@@ -9,6 +9,7 @@
   "files": [
     "dist",
     "plugins",
+    "scripts/verify-provider-bundles.mjs",
     "LICENSE"
   ],
   "engines": {
@@ -27,6 +28,7 @@
     "@voxd/sdk": "0.5.1"
   },
   "scripts": {
-    "build": "bun build ./src/index.ts --outdir ./dist --target node --format esm"
+    "build": "bun build ./src/index.ts --outdir ./dist --target node --format esm",
+    "prepack": "node scripts/verify-provider-bundles.mjs"
   }
 }

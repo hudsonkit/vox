@@ -1,5 +1,6 @@
 .*
 !.gitignore
+!packages/cli/plugins/.npmignore
 !.github
 !.github/workflows
 !.github/workflows/*.yml
@@ -9,6 +10,10 @@ site/next-env.d.ts
 site/out
 dist
 coverage
+__pycache__/
+*.pyc
+providers/target/
+packages/cli/plugins/*/bin/
 swift/.build
 swift/.swiftpm
 apps/*/.build

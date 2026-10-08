@@ -4,6 +4,7 @@
 - register ASR and TTS as separate `providers.json` entries
 - `command` is a string array containing executable and arguments
 - common methods: `models`, `install`, `preload`
+- install/preload results wrap model info as `{ "model": { ... } }`
 - ASR method: `transcribe` with an audio file `path`
 - TTS methods: `voices`, `synthesize`
 - ASR results require `metrics.inferenceMs` and `metrics.totalMs`
@@ -24,6 +25,16 @@
 - catalog families the engine can run: `parakeet-tdt`, `apple-speech`, `mlx-audio`, `openai-transcribe`
 - catalog plugins: `plugins[]` plus model `plugin` id; install writes `~/.vox/plugins/<id>/provider.json`
 - Gemma 4 E2B: plugin `mlx-vlm`; `vox plugins install mlx-vlm`
+- Whistle: optional `whistle` plugin/model, prebuilt Needle runtime in a separate Rust process; file ASR <=30 seconds, word timings, no live partials
+- default external ASR implementation: Rust; shared `vox-provider` crate in `providers/vox-provider/`, implement `AsrProvider`, call `serve(adapter)`
+- Rust host: one active operation, `-32001` busy, progress callback, Unix stdout descriptor isolation; EOF drains accepted work
+- starter: `providers/example/`; real adapter: `providers/whistle/`; workspace: `providers/Cargo.toml`
+- Rust tests: `bun run test:providers`; macOS build: `rustup target add aarch64-apple-darwin`, `bun run build:providers`
+- installed providers need no Rust/Python/uv; Swift still owns embedded Apple engines and daemon
+- native directory bundles: `plugins/<id>/bundle.json` executables map (`darwin-arm64` to bundle-relative binary), optional args/env
+- interpreted directory bundles: command/env/shared; `{pluginDir}` substitution; shared files from `plugins/shared/`
+- installer validates before writes, confines native executable to bundle, preserves executable mode, resolves interpreted launchers to absolute paths; legacy single `.mjs` supported
+- release builds native artifacts on macOS; CLI prepack rejects missing binaries
 - refresh never executes plugin commands
 - plugin launchers allowlist: `node`, `bun`, `npx`, `bunx`, `uv`, `uvx`, `python3`, `python`
 - refresh: `models.catalog` / `models.refreshCatalog`; CLI `vox models catalog [refresh]`

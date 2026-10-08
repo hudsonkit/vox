@@ -11,7 +11,35 @@ permissions:
   id-token: write
 
 jobs:
+  providers:
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.15
+
+      - name: Prepare Rust
+        run: rustup toolchain install stable --profile minimal --target aarch64-apple-darwin
+
+      - name: Test provider protocol and adapters
+        run: cargo +stable test --manifest-path providers/Cargo.toml --locked
+
+      - name: Build provider bundles
+        run: RUSTUP_TOOLCHAIN=stable bun run build:providers
+
+      - name: Upload provider bundles
+        uses: actions/upload-artifact@v4
+        with:
+          name: provider-binaries
+          path: packages/cli/plugins/*/bin/**
+          if-no-files-found: error
+
   publish:
+    needs: providers
     runs-on: ubuntu-latest
     environment: PRODUCTION
 
@@ -60,6 +88,15 @@ jobs:
 
       - name: Build packages
         run: bun run --cwd packages/client build && bun run --cwd packages/cli build && bun run --cwd packages/web-client build
+
+      - name: Download provider bundles
+        uses: actions/download-artifact@v4
+        with:
+          name: provider-binaries
+          path: packages/cli/plugins
+
+      - name: Restore executable permissions and verify provider bundles
+        run: chmod +x packages/cli/plugins/*/bin/*/* && node packages/cli/scripts/verify-provider-bundles.mjs
 
       - name: Wait for matching Minivox release
         env:

@@ -1,0 +1,12 @@
+[workspace]
+members = ["vox-provider", "example", "whistle"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[profile.release]
+lto = "thin"
+strip = "debuginfo"

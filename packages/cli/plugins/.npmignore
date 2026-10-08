@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+# Native binaries are generated before packaging and must ship in npm tarballs.
+!*/bin/
+!*/bin/**

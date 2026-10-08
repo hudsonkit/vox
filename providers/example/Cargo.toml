@@ -1,0 +1,27 @@
+[package]
+name = "vox-provider-example"
+version = "0.1.0"
+edition = "2021"
+description = "Small persistent ASR provider example for Vox"
+license = "MIT"
+default-run = "vox-provider-example"
+
+[dependencies]
+vox-provider = { path = "../vox-provider" }
+hound = "3.5"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+serde_json = "1"
+tempfile = "3"
+
+[[bin]]
+name = "vox-provider-example"
+path = "src/main.rs"
+
+[[bin]]
+name = "vox-provider-test-fixture"
+path = "tests/fixtures/provider.rs"
+test = false

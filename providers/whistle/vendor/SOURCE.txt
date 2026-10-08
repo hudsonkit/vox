@@ -1,0 +1,9 @@
+needle.h and LICENSE.needle are copied verbatim from:
+https://huggingface.co/Cactus-Compute/needle3/tree/2ae11323dc000f5e70c49f7403efa6af12ba9e67
+
+Header path: macos-arm64/needle.h
+License path: LICENSE
+
+The Rust declarations in src/engine.rs use only needle_load,
+needle_transcribe and needle_last_error. The prebuilt runtime is downloaded
+separately by explicit install. The upstream runtime implementation is private.

@@ -292,7 +292,7 @@ The provider can emit progress notifications on stdout during installation or pr
 { "jsonrpc": "2.0", "method": "progress", "params": { "modelId": "mlx-community/Kokoro-82M-4bit", "progress": 0.5, "status": "loading" } }
 ```
 
-**Response:** a model info object matching the shape returned by `models`.
+**Response:** `{ "model": { ... } }`, where `model` matches an entry returned by `models`.
 
 ### `preload`
 
@@ -304,7 +304,7 @@ Load a model into memory so subsequent requests start faster.
 { "jsonrpc": "2.0", "id": 3, "method": "preload", "params": { "modelId": "mlx-community/Soprano-1.1-80M-bf16" } }
 ```
 
-**Response:** a model info object with `preloaded: true`.
+**Response:** `{ "model": { ... } }`, with `model.preloaded: true` after loading succeeds.
 
 ## ASR Methods
 
@@ -500,6 +500,64 @@ Capacity should be explicit:
 - telemetry should distinguish provider execution time from queue/wait time when queueing exists
 
 ## Writing a provider
+
+### Rust ASR adapters
+
+Rust is the default implementation language for new external ASR providers. Use the `vox-provider` crate in `providers/vox-provider/`. It owns JSON-RPC parsing, result envelopes, progress notifications, error responses, and stdout isolation. Implement the `AsrProvider` trait:
+
+| Adapter method | Return value |
+|---|---|
+| `models()` | Model info list; inspect local state without downloading or loading weights |
+| `install(model_id, progress)` | Installed model info; prepare assets without loading the model |
+| `preload(model_id, progress)` | Model info after loading weights into memory |
+| `transcribe(path, model_id)` | Text, model id, elapsed time, stage metrics, and optional word timings |
+
+Use the supplied progress callback during installation or warm-up. Return `ProviderError` for an expected failure. Start the process with `serve(adapter)`. The adapter remains alive to retain model state between calls.
+
+The host permits one operation per process. Overlapping calls receive JSON-RPC error `-32001` (busy). Invalid input and adapter failures return errors without ending the process. On stdin EOF, the host finishes the accepted operation and exits. On Unix, native stdout output is redirected to stderr while a separate descriptor carries protocol responses.
+
+`providers/example/` is the runnable starter. It validates WAV input and returns sample text without an inference engine. `providers/whistle/` is the real engine adapter. Add a crate to `providers/Cargo.toml` for another engine. Use an existing audio conversion library and expose install and warm-up separately.
+
+```bash
+cargo run --manifest-path providers/Cargo.toml -p vox-provider-example
+# Write one JSON-RPC request per line, for example:
+# {"jsonrpc":"2.0","id":1,"method":"models","params":{}}
+```
+
+Swift continues to own the embedded Apple engine and the daemon. Other provider languages remain compatible with the same wire protocol.
+
+### Bundling a provider
+
+Add a directory under `packages/cli/plugins/<plugin-id>/` with `bundle.json` and a compiled executable:
+
+```json
+{
+  "executables": { "darwin-arm64": "bin/darwin-arm64/vox-whistle" },
+  "env": { "VOX_PROVIDER_CALL_TIMEOUT_SECONDS": "300" }
+}
+```
+
+Keys identify the operating system and architecture used by Node (`darwin-arm64` for Apple Silicon). The installer selects the matching executable, copies the bundle into `VOX_HOME/plugins/<plugin-id>/`, and writes an absolute command path. Native executables must be regular files inside the bundle. Unsupported platforms and missing binaries fail before changing an existing installation. Plugin registration does not run the provider.
+
+Build Whistle's Apple Silicon bundle on macOS:
+
+```bash
+rustup target add aarch64-apple-darwin
+bun run build:providers
+bun run --cwd packages/cli build
+```
+
+Rust is required to build providers from source. Installed providers run without Rust, Python, or `uv`. The package release workflow builds the binary on macOS and includes it in the CLI package. The CLI's prepack check rejects packages that lack a declared provider executable.
+
+Add a catalog plugin with `install: { "kind": "bundle", "id": "<plugin-id>" }` and a model entry whose `plugin` field matches the plugin id. Then run `vox plugins install <plugin-id>` and restart `voxd`. Extend `scripts/build-providers.ts` when adding a compiled bundle.
+
+Existing single-file `.mjs` bundles and interpreted directory bundles remain supported. Interpreted bundles use `command`, optional `shared` files from `plugins/shared/`, and `{pluginDir}` substitution. Their launcher is resolved using the installer's `PATH`.
+
+Bundle manifests and files ship with the CLI. A remote catalog can select a shipped bundle; it cannot replace that bundle's command. Bundle paths, shared filenames, symlinks, and commands are validated before installation changes files.
+
+Run `bun run test:providers` to test the Rust protocol and adapters. These tests do not download model assets. Use a separate `VOX_HOME` for a real installation and transcription check.
+
+### Other runtimes
 
 A provider is any executable that reads newline-delimited JSON-RPC from stdin and writes responses to stdout. Minimal TypeScript example:
 

@@ -31,7 +31,9 @@
     "tui": "bun run --cwd packages/tui index.tsx",
     "example:tui": "INIT_CWD=\"$PWD\" bun run --cwd examples/transcribe-tui index.tsx",
     "test": "bun test packages/client/test packages/cli/test packages/web-client/test && swift test --package-path swift",
-    "test:e2e": "swift build --package-path swift --product voxd --product voxbridge && VOX_E2E=1 bun test packages/client/test/transcribe-file.e2e.test.ts packages/web-client/test/live-session.e2e.test.ts"
+    "test:providers": "cargo test --manifest-path providers/Cargo.toml --locked",
+    "test:e2e": "swift build --package-path swift --product voxd --product voxbridge && VOX_E2E=1 bun test packages/client/test/transcribe-file.e2e.test.ts packages/web-client/test/live-session.e2e.test.ts",
+    "build:providers": "bun run scripts/build-providers.ts"
   },
   "devDependencies": {
     "@arach/dewey": "^0.3.4"
