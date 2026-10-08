@@ -1,6 +1,6 @@
 {
   "name": "@voxd/client",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "type": "module",
   "description": "Browser client for local transcription with Vox Companion.",
   "main": "./dist/index.js",
