@@ -168,6 +168,12 @@ public actor MicrophoneFileRecorder {
         session.commitConfiguration()
 
         let fileType = preferredOutputFileType(for: output)
+        // Pin the file format. Left unset, the writer adopts the first buffer's
+        // format and stops ("Recording Stopped") if the device stream later
+        // switches format, leaving a fraction of a second of audio.
+        if fileType == .wav {
+            output.audioSettings = Self.speechWAVSettings
+        }
         let prefix = normalizedFilePrefix(filePrefix)
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("\(prefix)-\(UUID().uuidString)")
@@ -251,6 +257,16 @@ public actor MicrophoneFileRecorder {
             throw MicrophoneCaptureError.permissionUnavailable
         }
     }
+
+    static var speechWAVSettings: [String: Any] { [
+        AVFormatIDKey: kAudioFormatLinearPCM,
+        AVSampleRateKey: 16_000,
+        AVNumberOfChannelsKey: 1,
+        AVLinearPCMBitDepthKey: 16,
+        AVLinearPCMIsFloatKey: false,
+        AVLinearPCMIsBigEndianKey: false,
+        AVLinearPCMIsNonInterleaved: false,
+    ] }
 
     private func preferredOutputFileType(for output: AVCaptureAudioFileOutput) -> AVFileType {
         let fileTypes = AVCaptureAudioFileOutput.availableOutputFileTypes()
