@@ -115,6 +115,16 @@ final class MinivoxModel: ObservableObject {
         }
     }
 
+    /// Stops listening and throws the recording away.
+    func cancelRecording() {
+        guard isRecording else { return }
+        isRecording = false
+        recordingStartedAt = nil
+        statusMessage = ""
+        Task { await recorder.cancel() }
+        setPhase(.idle)
+    }
+
     func warmASR() {
         Task {
             await runTask {
@@ -362,6 +372,11 @@ final class MinivoxModel: ObservableObject {
         copyTranscript(showConfirmation: false)
         await pasteTranscriptIfEnabled()
         setPhase(.finished(didPaste ? .pasted : .copied))
+    }
+
+    /// Microphone loudness (0...1) while recording, for the notch meter.
+    func currentInputLevel() async -> Float {
+        await recorder.inputLevel() ?? 0
     }
 
     private func setPhase(_ phase: DictationPhase) {

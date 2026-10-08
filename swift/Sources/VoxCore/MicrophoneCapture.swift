@@ -222,6 +222,16 @@ public actor MicrophoneFileRecorder {
         }
     }
 
+    /// Current input loudness, 0 (silence) to 1, for level meters.
+    /// Nil when no recording is active.
+    public func inputLevel() -> Float? {
+        guard let output else { return nil }
+        let channels = output.connections.flatMap(\.audioChannels)
+        guard !channels.isEmpty else { return nil }
+        let decibels = channels.map(\.averagePowerLevel).max() ?? -160
+        return max(0, min(1, (decibels + 50) / 50))
+    }
+
     public func cancel() {
         let current = currentURL
         output?.stopRecording()
@@ -383,6 +393,8 @@ public actor MicrophoneFileRecorder {
     public func stop() async throws -> URL {
         throw MicrophoneCaptureError.noActiveRecording
     }
+
+    public func inputLevel() -> Float? { nil }
 
     public func cancel() {}
 
