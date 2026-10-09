@@ -3,12 +3,12 @@ import Link from "next/link";
 import {
   ArrowLeft,
   ArrowUpRight,
-  Clipboard,
+  ClipboardCheck,
+  Command,
   Download,
   Github,
   Mic,
-  MousePointer2,
-  Sparkles,
+  TextCursorInput,
 } from "lucide-react";
 import { CopyCommand, CopyPrompt } from "../../components/copy-command";
 import { DictationIndicator } from "../../components/dictation-indicator";
@@ -29,16 +29,17 @@ export const metadata: Metadata = {
   },
 };
 
-const sourceUrl = "https://github.com/arach/vox/tree/main/apps/minivox";
-const downloadUrl = "https://github.com/arach/vox/releases/latest/download/Minivox.dmg";
+const sourceUrl = "https://github.com/hudsonkit/vox/tree/main/apps/minivox";
+const downloadUrl = "https://github.com/hudsonkit/vox/releases/latest/download/Minivox.dmg";
 
 const embedPrompt = `Embed Minivox-style dictation in this project.
 
-Read the Minivox source at ${sourceUrl} and the Vox embed guide at https://voxd.cc/docs/apple-embed. Add the Vox Swift package, then wire one shortcut that records the microphone, transcribes on-device with Parakeet, and pastes the text where the cursor is. Keep it as small as Minivox.`;
+Read the Minivox source at ${sourceUrl} and https://voxd.cc/docs/start-swift. Add the Vox Swift package (VoxCore and VoxEngine) and use VoxDictation: warmUp() when the user shows intent, start() on one shortcut, stop() on the next, then paste result.text where the cursor is. Keep it as small as Minivox.`;
 
 const sourceFiles = [
   { file: "MinivoxModel.swift", role: "record, transcribe, paste" },
   { file: "MinivoxNotch.swift", role: "the recording notch" },
+  { file: "MinivoxLivePreview.swift", role: "words as you speak" },
   { file: "MinivoxPreferences.swift", role: "shortcut and settings" },
   { file: "ContentView.swift", role: "menu-bar popover" },
   { file: "MinivoxMenuPages.swift", role: "history and settings pages" },
@@ -48,9 +49,9 @@ const sourceFiles = [
 ];
 
 const steps = [
-  { idx: "01", icon: MousePointer2, title: "Click", body: "Open Minivox from the menu bar and tap the microphone." },
-  { idx: "02", icon: Mic, title: "Speak", body: "Say what you need. Parakeet transcribes the recording locally." },
-  { idx: "03", icon: Clipboard, title: "Paste", body: "The finished dictation copies itself, ready for any app." },
+  { idx: "01", icon: Command, title: "Press", body: "Right ⌘M opens the notch and starts recording, from any app." },
+  { idx: "02", icon: Mic, title: "Speak", body: "Your words stream into the notch as you talk, transcribed on your Mac." },
+  { idx: "03", icon: TextCursorInput, title: "Paste", body: "Press again. Parakeet finishes the take and the text lands at your cursor." },
 ];
 
 export default function MinivoxPage() {
@@ -78,7 +79,7 @@ export default function MinivoxPage() {
             <Link href="/" className="hidden px-2.5 py-1.5 transition-colors hover:text-accent sm:inline-flex">Home</Link>
             <a href={downloadUrl} className="px-2.5 py-1.5 transition-colors hover:text-accent">Download</a>
             <Link href="/models" className="hidden px-2.5 py-1.5 transition-colors hover:text-accent sm:inline-flex">Models</Link>
-            <Link href="/docs/apple-embed" className="px-2.5 py-1.5 transition-colors hover:text-accent">Embed guide</Link>
+            <Link href="/docs/start-swift" className="px-2.5 py-1.5 transition-colors hover:text-accent">Embed guide</Link>
             <Link href={sourceUrl} target="_blank" rel="noreferrer noopener" className="px-2.5 py-1.5 transition-colors hover:text-accent">Source</Link>
           </nav>
         </div>
@@ -117,7 +118,7 @@ export default function MinivoxPage() {
                 View the source
               </Link>
               <Link
-                href="/docs/apple-embed"
+                href="/docs/start-swift"
                 className="inline-flex h-11 items-center gap-2 rounded-sm border border-line-strong bg-panel px-5 font-mono text-[11px] uppercase tracking-[0.08em] text-ink transition-colors hover:text-accent"
               >
                 Embed it
@@ -138,7 +139,7 @@ export default function MinivoxPage() {
               Tell your agents to embed it in your favorite project.
             </h2>
             <p className="mt-5 max-w-md text-[15px] leading-7 text-secondary">
-              Minivox is eight Swift files on top of Vox, small enough for an agent to read in one pass. Paste the prompt into Claude Code, Codex, or whatever you build with.
+              Minivox is nine Swift files on top of Vox, small enough for an agent to read in one pass. Paste the prompt into Claude Code, Codex, or whatever you build with.
             </p>
             <div className="mt-8 border border-line bg-canvas">
               <div className="flex items-center justify-between border-b border-line px-4 py-2.5 font-mono text-[10px] uppercase tracking-[0.14em] text-muted">
@@ -161,8 +162,8 @@ export default function MinivoxPage() {
               <Link href={sourceUrl} target="_blank" rel="noreferrer noopener" className="inline-flex items-center gap-2 transition-colors hover:text-accent">
                 Read the source <ArrowUpRight className="h-3 w-3" />
               </Link>
-              <Link href="/docs/apple-embed" className="inline-flex items-center gap-2 transition-colors hover:text-accent">
-                Apple embed guide <ArrowUpRight className="h-3 w-3" />
+              <Link href="/docs/start-swift" className="inline-flex items-center gap-2 transition-colors hover:text-accent">
+                Swift guide <ArrowUpRight className="h-3 w-3" />
               </Link>
             </div>
           </div>
@@ -173,7 +174,7 @@ export default function MinivoxPage() {
         <div className="mx-auto max-w-6xl px-6 py-20">
           <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted">{"// one small job"}</p>
           <h2 className="mt-4 max-w-[22ch] text-[clamp(1.7rem,3vw,2.5rem)] font-semibold leading-tight tracking-[-0.03em] text-ink">
-            From your voice to the clipboard in three steps.
+            From your voice to your cursor in three steps.
           </h2>
 
           <div className="mt-10 grid grid-cols-1 gap-px overflow-hidden rounded-sm border border-line bg-line sm:grid-cols-3">
@@ -205,17 +206,17 @@ export default function MinivoxPage() {
 
           <div className="grid gap-4 sm:grid-cols-2">
             <article className="rounded-sm border border-line bg-panel p-6">
-              <Sparkles className="h-5 w-5 text-accent" strokeWidth={1.7} />
-              <h3 className="mt-5 text-lg font-semibold text-ink">Automatic clipboard</h3>
+              <ClipboardCheck className="h-5 w-5 text-accent" strokeWidth={1.7} />
+              <h3 className="mt-5 text-lg font-semibold text-ink">Pastes where you type</h3>
               <p className="mt-3 text-[14px] leading-7 text-secondary">
-                Stop recording and the finished text is already copied. Paste it wherever you were working.
+                Stop recording and the text goes straight into the app you were in. It stays on the clipboard too, in case you want it twice.
               </p>
             </article>
             <article className="rounded-sm border border-line bg-panel p-6">
               <Mic className="h-5 w-5 text-accent" strokeWidth={1.7} />
               <h3 className="mt-5 text-lg font-semibold text-ink">Local Parakeet transcription</h3>
               <p className="mt-3 text-[14px] leading-7 text-secondary">
-                Audio is recorded and transcribed on the Mac. Warm-up stays an explicit control so the first dictation is predictable.
+                Audio never leaves the Mac. Minivox warms the model up ahead of time, so even a long first take comes back in a moment.
               </p>
             </article>
           </div>
@@ -243,7 +244,7 @@ export default function MinivoxPage() {
               <ol className="mt-3 space-y-2 text-[14px] leading-6 text-secondary">
                 <li><span className="mr-2 font-mono text-accent">01</span>Put the text cursor where you want your dictation.</li>
                 <li><span className="mr-2 font-mono text-accent">02</span>Press <span className="font-mono text-ink">Right ⌘M</span> to start, then allow microphone and Accessibility access.</li>
-                <li><span className="mr-2 font-mono text-accent">03</span>Press <span className="font-mono text-ink">Right ⌘M</span> again to stop. Minivox copies the text and pastes it when Accessibility access is enabled.</li>
+                <li><span className="mr-2 font-mono text-accent">03</span>Press <span className="font-mono text-ink">Right ⌘M</span> again to stop. Minivox pastes the text at your cursor and leaves a copy on the clipboard.</li>
               </ol>
               <p className="mt-3 text-[12px] leading-5 text-muted">
                 The first dictation may download Parakeet. Open <span className="font-mono text-ink">minivox settings</span> to change the shortcut or microphone.
@@ -253,8 +254,8 @@ export default function MinivoxPage() {
               <Link href={sourceUrl} target="_blank" rel="noreferrer noopener" className="inline-flex items-center gap-2 transition-colors hover:text-accent">
                 Source and setup <ArrowUpRight className="h-3 w-3" />
               </Link>
-              <Link href="/docs/apple-embed" className="inline-flex items-center gap-2 transition-colors hover:text-accent">
-                Apple embed guide <ArrowUpRight className="h-3 w-3" />
+              <Link href="/docs/start-swift" className="inline-flex items-center gap-2 transition-colors hover:text-accent">
+                Swift guide <ArrowUpRight className="h-3 w-3" />
               </Link>
             </div>
           </div>
@@ -267,7 +268,7 @@ export default function MinivoxPage() {
           <div className="flex gap-5">
             <Link href="/" className="transition-colors hover:text-accent">/home</Link>
             <a href={downloadUrl} className="transition-colors hover:text-accent">/download</a>
-            <Link href="/docs/apple-embed" className="transition-colors hover:text-accent">/embed</Link>
+            <Link href="/docs/start-swift" className="transition-colors hover:text-accent">/embed</Link>
             <Link href={sourceUrl} target="_blank" rel="noreferrer noopener" className="inline-flex items-center gap-2 transition-colors hover:text-accent">
               <Github className="h-3 w-3" />
               /source

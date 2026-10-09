@@ -1,11 +1,12 @@
 import Link from "next/link";
 import { ArrowUpRight, Download, Github } from "lucide-react";
 import { CopyCommand } from "../components/copy-command";
+import { DictationIndicator } from "../components/dictation-indicator";
 import { ScreenshotLightbox } from "../components/screenshot-lightbox";
 import cliPkg from "../../packages/cli/package.json";
 
 const VOX_VERSION = cliPkg.version;
-const VOX_RELEASE_URL = `https://github.com/arach/vox/releases/tag/v${VOX_VERSION}`;
+const VOX_RELEASE_URL = `https://github.com/hudsonkit/vox/releases/tag/v${VOX_VERSION}`;
 
 const featureRows = [
   { idx: "01", title: "Transcription", body: "Turn recorded files or live microphone audio into text, with word timings when you need them." },
@@ -67,13 +68,13 @@ export default function Home() {
             <Link href="#packages" className="px-2.5 py-1.5 transition-colors hover:text-accent">Packages</Link>
             <Link href="/minivox" className="px-2.5 py-1.5 transition-colors hover:text-accent">Minivox</Link>
             <Link href="#perf" className="px-2.5 py-1.5 transition-colors hover:text-accent">Perf</Link>
-            <Link href="https://github.com/arach/vox" target="_blank" rel="noreferrer noopener" className="px-2.5 py-1.5 transition-colors hover:text-accent">GitHub</Link>
+            <Link href="https://github.com/hudsonkit/vox" target="_blank" rel="noreferrer noopener" className="px-2.5 py-1.5 transition-colors hover:text-accent">GitHub</Link>
           </nav>
           <nav aria-label="Primary mobile" className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted sm:hidden">
             <Link href="/docs/overview" className="px-2 py-1.5 transition-colors hover:text-accent">Docs</Link>
             <Link href="/models" className="px-2 py-1.5 transition-colors hover:text-accent">Models</Link>
             <Link href="/minivox" className="px-2 py-1.5 transition-colors hover:text-accent">Minivox</Link>
-            <Link href="https://github.com/arach/vox" target="_blank" rel="noreferrer noopener" className="px-2 py-1.5 transition-colors hover:text-accent">GitHub</Link>
+            <Link href="https://github.com/hudsonkit/vox" target="_blank" rel="noreferrer noopener" className="px-2 py-1.5 transition-colors hover:text-accent">GitHub</Link>
           </nav>
         </div>
       </header>
@@ -207,14 +208,14 @@ export default function Home() {
 
       {/* Minivox */}
       <section id="minivox" className="border-b border-line bg-panel">
-        <div className="mx-auto grid max-w-6xl gap-12 px-6 py-20 lg:grid-cols-[1fr_1.4fr] lg:items-start">
+        <div className="mx-auto grid max-w-6xl gap-12 px-6 py-20 lg:grid-cols-[1fr_1.2fr] lg:items-center">
           <div>
             <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted">{"// minivox"}</p>
             <h2 className="mt-4 max-w-[22ch] text-[clamp(1.5rem,2.6vw,2rem)] font-semibold leading-tight tracking-[-0.02em] text-ink">
               Minivox is the smallest possible dictation thing.
             </h2>
             <p className="mt-4 max-w-md text-[15px] leading-7 text-secondary">
-              Open source and hackable. Press a shortcut, speak, and Minivox transcribes locally with Parakeet and pastes the text.
+              Open source and hackable. Press a shortcut and speak. Your words stream into the notch as you talk, and the text pastes where your cursor is.
             </p>
             <p className="mt-4 max-w-md text-[14px] leading-7 text-secondary">
               Tell your agents to embed it in your favorite project. It is a few Swift files on Vox, with no daemon or browser bridge.
@@ -228,10 +229,10 @@ export default function Home() {
                 Parakeet
               </span>
               <span className="inline-flex items-center gap-2 rounded-sm border border-line-strong bg-canvas px-3 py-1.5">
-                Auto-copy
+                Live words
               </span>
               <span className="inline-flex items-center gap-2 rounded-sm border border-line-strong bg-canvas px-3 py-1.5">
-                Menu bar
+                Auto-paste
               </span>
             </div>
             <Link
@@ -242,36 +243,7 @@ export default function Home() {
               <ArrowUpRight className="h-3.5 w-3.5" />
             </Link>
           </div>
-          <div className="overflow-hidden rounded-sm border border-line-strong bg-canvas shadow-[0_24px_80px_rgba(0,0,0,0.22)]">
-            <div className="flex items-center gap-2 border-b border-line px-3 py-2.5">
-              <span aria-hidden="true" className="inline-block h-1.5 w-1.5 rounded-full bg-line-strong" />
-              <span aria-hidden="true" className="inline-block h-1.5 w-1.5 rounded-full bg-line-strong" />
-              <span aria-hidden="true" className="inline-block h-1.5 w-1.5 rounded-full bg-line-strong" />
-              <span className="ml-auto font-mono text-[11px] text-muted">Minivox</span>
-            </div>
-            <div className="p-6">
-              <div className="flex flex-wrap gap-2 font-mono text-[10px] uppercase tracking-[0.12em] text-muted">
-                <span className="rounded-full border border-line px-3 py-1">Parakeet ready</span>
-                <span className="rounded-full border border-line px-3 py-1">Microphone ready</span>
-                <span className="rounded-full border border-line px-3 py-1">Auto-copy on</span>
-              </div>
-              <div className="mt-6 flex justify-center">
-                <div className="grid h-28 w-28 place-items-center rounded-full border-[7px] border-accent/70 bg-panel text-center font-mono text-[10px] uppercase tracking-[0.12em] text-secondary shadow-[0_0_50px_rgba(239,92,80,0.12)]">
-                  Press<br />to talk
-                </div>
-              </div>
-              <div className="mt-6 grid gap-3">
-                <div className="rounded-sm border border-line bg-panel px-4 py-3">
-                  <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted">You · transcript</p>
-                  <p className="mt-2 text-[13px] leading-6 text-secondary">Meet me outside the studio at half past three.</p>
-                </div>
-                <div className="rounded-sm border border-line bg-panel px-4 py-3">
-                  <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-accent">Copied to clipboard</p>
-                  <p className="mt-2 text-[13px] leading-6 text-secondary">Ready to paste into any app.</p>
-                </div>
-              </div>
-            </div>
-          </div>
+          <DictationIndicator />
         </div>
       </section>
 
@@ -386,12 +358,12 @@ export default function Home() {
             <span className="text-ink">vox</span>
             <span>v{VOX_VERSION} · local-first</span>
           </div>
-          <div className="flex gap-5">
+          <div className="flex flex-wrap gap-x-5 gap-y-2">
             <Link href="/docs/overview" className="transition-colors hover:text-accent">/docs</Link>
             <Link href="/minivox" className="transition-colors hover:text-accent">/minivox</Link>
             <Link href="/download" className="transition-colors hover:text-accent">/download</Link>
             <Link href="/blog" className="transition-colors hover:text-accent">/blog</Link>
-            <Link href="https://github.com/arach/vox" target="_blank" rel="noreferrer noopener" className="inline-flex items-center gap-2 transition-colors hover:text-accent">
+            <Link href="https://github.com/hudsonkit/vox" target="_blank" rel="noreferrer noopener" className="inline-flex items-center gap-2 transition-colors hover:text-accent">
               <Github className="h-3 w-3" />
               /github
             </Link>

@@ -79,7 +79,7 @@ export default function WebSdkPage() {
             <Link href="/blog" className="rounded-md px-3 py-2 transition-colors hover:bg-wave hover:text-ink">
               Blog
             </Link>
-            <Link href="https://github.com/arach/vox/tree/main/packages/web-client" target="_blank" rel="noreferrer noopener" className="rounded-md px-3 py-2 transition-colors hover:bg-wave hover:text-ink">
+            <Link href="https://github.com/hudsonkit/vox/tree/main/packages/web-client" target="_blank" rel="noreferrer noopener" className="rounded-md px-3 py-2 transition-colors hover:bg-wave hover:text-ink">
               Source
             </Link>
           </div>
@@ -207,7 +207,7 @@ export default function WebSdkPage() {
               </Link>
 
               <Link
-                href="https://github.com/arach/vox/tree/main/packages/web-client"
+                href="https://github.com/hudsonkit/vox/tree/main/packages/web-client"
                 target="_blank"
                 rel="noreferrer noopener"
                 className="group rounded-lg border border-line bg-panel px-5 py-4 transition-all hover:border-accent/50 hover:bg-wave"

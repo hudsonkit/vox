@@ -171,7 +171,7 @@ export default async function BlogPostPage({ params }: { params: Promise<{ slug:
             <Link href="/blog" className="rounded-md px-3 py-2 transition-colors hover:bg-wave hover:text-ink">
               Blog
             </Link>
-            <Link href="https://github.com/arach/vox" target="_blank" rel="noreferrer noopener" className="rounded-md px-3 py-2 transition-colors hover:bg-wave hover:text-ink">
+            <Link href="https://github.com/hudsonkit/vox" target="_blank" rel="noreferrer noopener" className="rounded-md px-3 py-2 transition-colors hover:bg-wave hover:text-ink">
               GitHub
             </Link>
           </div>
@@ -217,7 +217,7 @@ export default async function BlogPostPage({ params }: { params: Promise<{ slug:
             <Link href="/docs/overview" className="transition-colors hover:text-ink">
               Docs
             </Link>
-            <Link href="https://github.com/arach/vox" target="_blank" rel="noreferrer noopener" className="inline-flex items-center gap-2 transition-colors hover:text-ink">
+            <Link href="https://github.com/hudsonkit/vox" target="_blank" rel="noreferrer noopener" className="inline-flex items-center gap-2 transition-colors hover:text-ink">
               <Github className="h-3.5 w-3.5" />
               GitHub
             </Link>

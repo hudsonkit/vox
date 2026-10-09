@@ -38,7 +38,7 @@ I don't have grand plans for this. If people find it useful, great. If not, I'll
 ## Get started
 
 \`\`\`bash
-git clone https://github.com/arach/vox.git && cd vox
+git clone https://github.com/hudsonkit/vox.git && cd vox
 bun install && bun run build
 node packages/cli/dist/index.js daemon start
 node packages/cli/dist/index.js doctor
