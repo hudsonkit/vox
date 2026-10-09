@@ -4,16 +4,23 @@
 
 ## Choose a surface
 
-- Apple app process: VoxCore + VoxEngine (+ optional VoxAppleSpeech)
-- Bun or Node tool: voxd + @voxd/sdk
-- Browser app: Vox Companion + @voxd/client
-- Operator workflow: @voxd/cli
+- Start here: /docs/start
+- Vox in your app (Swift, in process): VoxCore + VoxEngine, start with VoxDictation (+ optional VoxAppleSpeech): /docs/start-swift
+- Vox for Node (Bun or Node tool, via Vox on your Mac): @voxd/sdk: /docs/start-node
+- Vox for the browser (web page or extension, via Vox on your Mac): @voxd/client: /docs/start-browser
+- Command line: @voxd/cli: /docs/quickstart
 
 ## Documentation
 
+- [Start here](/docs/start): Pick the shortest path to working speech with Vox, in your app, on your Mac, from Node, or from the browser.
+- [Vox on your Mac](/docs/start-mac): Try Minivox in sixty seconds, then install the Vox app so Node tools and web pages can use speech on your Mac.
+- [Vox in your app](/docs/start-swift): Add on-device dictation and speech output to a Swift app with VoxDictation, from package setup to a shippable app.
+- [Vox for Node](/docs/start-node): Transcribe, dictate and speak from a Bun or Node tool through Vox on your Mac.
+- [Vox for the browser](/docs/start-browser): Add dictation and file transcription to a web page or extension through Vox on your Mac.
+- [Build with an agent](/docs/start-agent): Copy-paste prompts that get a coding agent to add Vox to your project correctly the first time.
 - [Vox Overview](/docs/overview): Choose the right Vox integration mode and understand the stack's runtime, package, and telemetry surfaces.
-- [Quickstart](/docs/quickstart): Install Vox Companion, verify runtime health, and exercise transcription, synthesis, and performance tools.
-- [Swift Embed Guide](/docs/apple-embed): Agent-oriented instructions for integrating Vox directly into macOS and iOS apps such as Linea.
+- [Command line](/docs/quickstart): Install Vox on your Mac, check its health, and exercise transcription, speech, preload and timings from the terminal.
+- [Swift embed reference](/docs/apple-embed): Every type for running Vox inside a macOS or iOS app, covering dictation, transcription, speech output, timings and packaging.
 - [Runtime](/docs/runtime): Companion request flow, warm-up, sessions, routes, ports, and runtime ownership boundaries.
 - [Models and plugins](/docs/models): Published dictation catalog, built-in families, and how Vox plugins install new ASR runtimes.
 - [Provider Protocol](/docs/providers): How external STT and TTS engines plug into Vox via JSON-RPC over stdin/stdout.

@@ -1,0 +1,12 @@
+{
+  "name": "vox-node-hello",
+  "private": true,
+  "type": "module",
+  "description": "Transcribe a file and speak a line through Vox on your Mac",
+  "scripts": {
+    "start": "bun run index.ts"
+  },
+  "dependencies": {
+    "@voxd/sdk": "file:../../packages/client"
+  }
+}

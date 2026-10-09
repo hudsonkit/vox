@@ -1,6 +1,22 @@
 # Vox
 
-Vox is a local-first voice stack for Apple platforms. This repo brings together the Hudson-powered menu bar app, the Swift runtime, the companion daemon, the TypeScript clients, and the CLI.
+Open-source speech-to-text and text-to-speech for Mac apps.
+
+```swift
+let dictation = VoxDictation(clientId: "my-app")
+try await dictation.warmUp()
+try await dictation.start()
+let text = try await dictation.stop().text
+```
+
+**Start here: [voxd.cc/docs/start](https://voxd.cc/docs/start)**
+
+- [Try Minivox in 60 seconds](https://voxd.cc/docs/start-mac): `bunx @voxd/cli@latest install mini`
+- [Vox in your app](https://voxd.cc/docs/start-swift): dictation and speech output in a Swift app
+- [Vox for Node](https://voxd.cc/docs/start-node) and [Vox for the browser](https://voxd.cc/docs/start-browser): use Vox on your Mac from other programs
+- [Build with an agent](https://voxd.cc/docs/start-agent): prompts that wire Vox in correctly
+
+This repo brings together the Hudson-powered menu bar app, the Swift runtime, the companion daemon, the TypeScript clients, and the CLI.
 
 - `VoxCore`, `VoxEngine`, `VoxService`, and `VoxBridge`: embeddable Swift packages for macOS and iOS apps.
 - `voxd`: Vox Companion, the Swift daemon for web-facing, shared-process, and operator integrations.
@@ -14,7 +30,7 @@ Apple apps can embed Vox directly. Bun and Node tools can connect to `voxd` over
 
 ## Pick a surface
 
-- Build a native Apple app: start with `VoxCore` and `VoxEngine`; add `VoxService` or `VoxBridge` only for deliberate companion/runtime embedding.
+- Build a native Apple app: start with `VoxDictation` in `VoxCore` + `VoxEngine`; add `VoxService` or `VoxBridge` only for deliberate companion/runtime embedding.
 - Build a local tool or companion-connected service: start with `voxd` plus `@voxd/sdk`.
 - Build a browser integration: start with `@voxd/client` plus the local bridge path.
 - Operate or benchmark Vox itself: start with the `vox` CLI.
@@ -37,7 +53,7 @@ The built-in ASR shortlist includes CoreML Parakeet and Apple SpeechTranscriber.
 To work on Vox:
 
 ```bash
-git clone https://github.com/arach/vox.git
+git clone https://github.com/hudsonkit/vox.git
 cd vox
 bun install
 bun run build
@@ -57,7 +73,7 @@ swift build --package-path swift
 To use Vox Companion locally from the CLI or SDK:
 
 ```bash
-git clone https://github.com/arach/vox.git
+git clone https://github.com/hudsonkit/vox.git
 cd vox
 bun install
 bun run build

@@ -10,7 +10,7 @@ Vox is a local-first voice stack for macOS and iOS. It supports both speech-to-t
 
 Main surfaces:
 
-- Swift packages: `VoxCore`, `VoxEngine`, `VoxService`, `VoxBridge` for embedded Apple app integrations.
+- Swift packages: `VoxCore` and `VoxEngine` (start with `VoxDictation`), plus optional `VoxAppleSpeech` for speech output, for apps that run Vox in process. `VoxService` and `VoxBridge` are the companion runtime itself, not needed in an app.
 - `voxd`: Vox Companion, the Swift daemon. Warm-up, telemetry, bridge transport, shared-process coordination.
 - `@voxd/sdk`: TypeScript SDK for Bun/Node and other companion-connected integrations. WebSocket JSON-RPC to `voxd`.
 - `@voxd/client`: Browser SDK. HTTP bridge to the Vox Companion for web apps.

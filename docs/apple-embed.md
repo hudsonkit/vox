@@ -1,9 +1,9 @@
 ---
-title: Swift Embed Guide
-description: Agent-oriented instructions for integrating Vox directly into macOS and iOS apps such as Linea.
+title: Swift embed reference
+description: Every type for running Vox inside a macOS or iOS app, covering dictation, transcription, speech output, timings and packaging.
 ---
 
-Use this guide when you are integrating Vox into a macOS or iOS app and want the app to call Vox directly in process. This is the default path for Apple-native clients such as Linea.
+This is the reference for running Vox inside a macOS or iOS app. New here? [Vox in your app](./start-swift.md) gets dictation working in a few minutes; come back for the details.
 
 ## Choose the integration mode
 
@@ -13,8 +13,10 @@ Use this guide when you are integrating Vox into a macOS or iOS app and want the
 
 ## What embed mode is today
 
-The current public embed surface is low-level but usable:
+Start with `VoxDictation`. It wraps the pieces below in four calls: `warmUp()`, `start()`, `stop()`, `cancel()`, plus `transcribe(fileURL:)`. It records timings for you. Reach for the lower-level types when you need something it does not do.
 
+- dictation: `VoxDictation` (microphone capture on macOS only; file transcription on both)
+- microphone capture: `MicrophoneFileRecorder` (macOS only; the iOS build throws)
 - ASR: `EngineManager`
 - TTS generation: `TTSEngineManager`, `SynthesisRequest`
 - optional Apple playback: `VoxAppleSpeech` / `AppleSpeechOutputController`
@@ -22,14 +24,20 @@ The current public embed surface is low-level but usable:
 - telemetry: `PerformanceRecorder`, `PerformanceSample`
 - provider composition: `ProviderRegistry`, `TTSProviderRegistry`, `ProvidersConfig`, `ProviderEntry`
 
-There is not yet a polished one-object Apple SDK facade. Agents should usually create a thin app-local wrapper such as `VoiceService` or `LineaVoiceStack` and keep raw Vox types behind that boundary. Use `VoxAppleSpeech` when the app wants a reusable per-audible-surface playback controller; keep product policy in the app.
+For anything beyond `VoxDictation`, keep raw Vox types behind one app-local actor such as `VoiceService`. Use `VoxAppleSpeech` when the app wants a reusable per-audible-surface playback controller; keep product policy in the app.
 
 ## Package setup
 
 `VoxCore` and `VoxEngine` support direct transcription embedding on macOS 14+
 and iOS 17+. Minivox uses that same direct path and requires macOS 26+.
 
-For a sibling repo during local development, prefer a local SwiftPM dependency:
+Add the package from GitHub:
+
+```swift
+.package(url: "https://github.com/hudsonkit/vox.git", from: "0.5.2")
+```
+
+For a sibling checkout during local development, use a path dependency instead:
 
 ```swift
 .package(path: "../vox/swift")
@@ -50,16 +58,16 @@ import Foundation
 import VoxCore
 import VoxEngine
 
-actor LineaVoiceStack {
+actor VoiceStack {
     private let clientId: String
     private let asr: EngineManager
     private let tts: TTSEngineManager
     private let performance = PerformanceRecorder()
 
-    init(clientId: String = "linea-ios") {
+    init(clientId: String = "my-app") {
         self.clientId = clientId
         self.asr = EngineManager()      // Parakeet
-        self.tts = TTSEngineManager()   // OpenAI TTS plus AVSpeech fallback
+        self.tts = TTSEngineManager()   // every built-in TTS provider; no automatic fallback
     }
 
     func warmup() async throws {
@@ -114,14 +122,13 @@ actor LineaVoiceStack {
 
 In embed mode, the app still owns:
 
-- microphone permission
-- audio capture
-- temp-file creation for ASR input
+- microphone permission (`NSMicrophoneUsageDescription`, and the audio-input entitlement when sandboxed)
+- audio capture on iOS; on macOS `VoxDictation` or `MicrophoneFileRecorder` can capture for you
 - product-level spoken-output policy
 - interruption handling
 - product-level state and UX
 
-Today the ASR entrypoint takes a `URL`, not an in-memory audio buffer. Agents should capture audio, write it to a temporary file, then call `transcribe(url:modelId:)`.
+The ASR entrypoint takes a `URL`, not an in-memory audio buffer. `VoxDictation` records to a temporary file and deletes it after `stop()`. On iOS, write the recording to a file yourself, then call `transcribe(fileURL:)`.
 
 `TTSProvider` and `TTSEngineManager` stay generation-only. They return WAV bytes in `SynthesisOutput.audioData` and do not own playback. Apps may play those bytes themselves, or opt into `VoxAppleSpeech` for a reusable Apple playback controller.
 
@@ -149,16 +156,17 @@ Route/model capability (`SpeechOutputCapabilities`) tells the controller whether
 
 Warm-up must remain explicit.
 
+- dictation: `VoxDictation.warmUp(progress:)`
 - ASR warm-up: `EngineManager.preload(modelId:progress:)`
 - TTS warm-up: `TTSEngineManager.preload(modelId:voiceId:progress:)`
 
-Do not hide warm-up behind app launch side effects unless the product intentionally chooses the `.eager` model download policy. Prefer `.onFirstUse` or warming on intent at a predictable app state transition.
+Do not hide warm-up behind app launch side effects. Warm on intent at a predictable app state transition, such as opening the screen that dictates. Without warm-up, the first transcription pays the model load.
 
 ## Telemetry
 
-Companion mode records telemetry automatically. Embed mode does not.
+Companion mode records telemetry automatically. In embed mode, `VoxDictation` records a sample for every transcription (pass `recordsPerformance: false` to opt out). The lower-level types do not.
 
-If the app wants parity with Vox Companion telemetry, record samples yourself with `PerformanceRecorder` and preserve these dimensions:
+When you call `EngineManager` or `TTSEngineManager` directly, record samples yourself with `PerformanceRecorder` and preserve these dimensions:
 
 - `clientId`
 - `route`
@@ -167,6 +175,7 @@ If the app wants parity with Vox Companion telemetry, record samples yourself wi
 
 Use the same route names Vox Companion uses:
 
+- `transcribe.dictation` (microphone dictation, as `VoxDictation` records it)
 - `transcribe.file`
 - `synthesize.generate`
 
@@ -177,14 +186,14 @@ Use the same route names Vox Companion uses:
 
 ## OpenAI TTS in embed mode
 
-The default TTS surface is OpenAI-backed when an API key is configured:
-
 - ASR: `EngineManager()` -> `ParakeetProvider()`
-- TTS: `TTSEngineManager()` -> OpenAI TTS plus AVSpeech fallback
-- default TTS model: `TTSDefaults.modelId` = `gpt-4o-mini-tts`
-- local fallback TTS model: `TTSDefaults.localModelId` = `avspeech:system`
+- TTS: `TTSEngineManager()` registers every built-in provider: OpenAI, ElevenLabs, MiniMax, NVIDIA, Groq, Gemini and AVSpeech. It routes by model id and never falls back from one provider to another.
+- default TTS model: `TTSDefaults.modelId` = `gpt-4o-mini-tts`, which needs an OpenAI key
+- local TTS model: `TTSDefaults.localModelId` = `avspeech:system`, on device, no key
 
-Prefer passing secrets in code or app configuration rather than relying on process environment inside an iOS app.
+A synthesis request with `gpt-4o-mini-tts` and no key throws. If the app wants the system voice as a fallback, catch the error and retry with `TTSDefaults.localModelId`.
+
+Keys are looked up in this order: `SynthesisRequest.providerCredentials`, the provider entry's `env`, the process environment, then the Vox credential store. An iOS app has no useful process environment, so pass the key in code. Never ship a long-lived key inside the app binary.
 
 ```swift
 let ttsConfig = ProvidersConfig(providers: [
@@ -206,33 +215,34 @@ let ttsConfig = ProvidersConfig(providers: [
 let tts = TTSEngineManager(provider: TTSProviderRegistry(config: ttsConfig))
 ```
 
-## Linea default plan
+## Default plan
 
-For the first Linea integration, the default plan should be:
+For a new Apple app integration, the default plan is:
 
 - use embed mode on iOS and macOS
 - add `VoxCore` and `VoxEngine`, plus `VoxAppleSpeech` if the app wants reusable Apple playback
-- wrap Vox in one app-local actor or service
+- start with `VoxDictation`; wrap anything lower-level in one app-local actor or service
 - use `parakeet:v3` for ASR; `parakeet:v2` is the English-only TDT option
 - use `gpt-4o-mini-tts` for default TTS
 - use `avspeech:system` only when a local system voice fallback is required
-- record Vox-compatible telemetry from the app
+- keep `VoxDictation`'s timings on, or record Vox-compatible samples yourself
 - use Vox Companion only for web surfaces or cross-process workflows
 
 ## What agents should not assume
 
-- There is no public one-object Apple SDK facade yet. `VoxAppleSpeech` is optional playback, not that facade.
-- There is no public embed live-session coordinator yet.
+- `VoxDictation` covers dictation only. `VoxAppleSpeech` is optional playback, separate from it.
+- `VoxDictation.start()` is macOS only; on iOS it throws.
+- There is no public embed live-session coordinator yet: no partial text while recording.
 - There is no public embed warm-up coordinator helper.
-- Embed mode does not automatically write performance samples.
+- `EngineManager` and `TTSEngineManager` do not write performance samples; only `VoxDictation` does.
 - Apple apps do not need `@voxd/sdk` or `@voxd/client`.
 - `VoxAppleSpeech` does not own browser playback or app product policy.
 
 ## First tasks in a sibling app repo
 
-1. Add `../vox/swift` as a local package dependency.
-2. Create a single `VoiceService` or `LineaVoiceStack` actor in app code.
-3. Warm the ASR and TTS engines explicitly.
+1. Add `https://github.com/hudsonkit/vox`, or `../vox/swift` for a sibling checkout.
+2. Create one `VoxDictation`, or a single `VoiceService` actor in app code for lower-level use.
+3. Warm explicitly, on user intent.
 4. Feed ASR with file URLs, not raw buffers.
 5. Feed TTS output WAV data into the app playback layer, or use `AppleSpeechOutputController` for per-surface Apple playback.
 6. Emit `PerformanceSample` records with stable route names.
@@ -242,7 +252,8 @@ See [Observability](./observability.md) for metric interpretation and [Architect
 
 ## Packaged app resources
 
-Copy `Vox_HudsonSpeechEngine.bundle` into the signed app's `Contents/Resources`.
+Xcode copies SwiftPM resource bundles into the app for you. If you package the app yourself, copy the bundle SwiftPM built into the signed app's `Contents/Resources`. SwiftPM names it after the package that declares the target: `Vox_HudsonSpeechEngine.bundle` when you depend on the repository root, `HudsonSpeechEngine_HudsonSpeechEngine.bundle` when you depend on `vox/swift`. Vox looks for both.
+
 `SpeechEngineResources` resolves the model catalog and mlx-audio provider script
 from that location in apps, and from SwiftPM resources in command-line builds.
 A packaged app does not fall back to a developer build directory.

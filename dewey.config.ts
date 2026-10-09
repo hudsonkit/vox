@@ -36,7 +36,7 @@ export default {
       { pattern: "site/*", instruction: "Maintain the clean, restrained Vox visual language. Avoid generic startup landing page patterns." },
     ],
 
-    sections: ["overview", "quickstart", "apple-embed", "runtime", "models", "providers", "sdk", "web-integration", "observability", "architecture", "api", "agents", "skill"],
+    sections: ["start", "start-mac", "start-swift", "start-node", "start-browser", "start-agent", "overview", "quickstart", "apple-embed", "runtime", "models", "providers", "sdk", "web-integration", "observability", "architecture", "api", "agents", "skill"],
   },
 
   docs: {
@@ -58,7 +58,7 @@ export default {
       "Microphone permission if testing live transcription",
     ],
     steps: [
-      { description: "Clone the repository", command: "git clone https://github.com/arach/vox.git && cd vox" },
+      { description: "Clone the repository", command: "git clone https://github.com/hudsonkit/vox.git && cd vox" },
       { description: "Install dependencies", command: "bun install" },
       { description: "Build the SDK, CLI, and daemon", command: "bun run build" },
       { description: "Run tests", command: "bun run test" },

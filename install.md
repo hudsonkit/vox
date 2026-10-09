@@ -33,7 +33,7 @@ Clone Vox, build the runtime, start the companion daemon, and verify local speec
 ## Step 1: Clone the repository
 
 ```bash
-git clone https://github.com/arach/vox.git && cd vox
+git clone https://github.com/hudsonkit/vox.git && cd vox
 ```
 
 ## Step 2: Install dependencies

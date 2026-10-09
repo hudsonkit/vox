@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Vox web hello</title>
+    <style>
+      body { font: 15px/1.5 -apple-system, system-ui, sans-serif; max-width: 36rem; margin: 3rem auto; padding: 0 1rem; color: #222; }
+      button { font: inherit; padding: .4rem .9rem; margin-right: .4rem; }
+      #status { color: #666; }
+      #text { min-height: 3rem; padding: .75rem; border: 1px solid #ddd; border-radius: 6px; white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <h1>Vox web hello</h1>
+    <p id="status">Looking for Vox on this Mac…</p>
+    <p>
+      <button id="start" disabled>Start dictation</button>
+      <button id="stop" disabled>Stop</button>
+      <input id="file" type="file" accept="audio/*" disabled />
+    </p>
+    <div id="text"></div>
+    <script type="module" src="./app.ts"></script>
+  </body>
+</html>
