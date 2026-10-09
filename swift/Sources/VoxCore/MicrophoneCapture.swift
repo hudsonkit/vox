@@ -124,8 +124,8 @@ public actor MicrophoneFileRecorder {
     private let log = VoxLog.audio
 
     private var session: AVCaptureSession?
-    private var output: AVCaptureAudioFileOutput?
-    private var recordingDelegate: MicrophoneFileRecordingDelegate?
+    private var output: AVCaptureAudioDataOutput?
+    private var sink: MicrophoneSampleSink?
     private var currentURL: URL?
 
     public init() {}
@@ -134,9 +134,20 @@ public actor MicrophoneFileRecorder {
         session != nil
     }
 
+    /// Starts recording to a temporary 16 kHz mono WAV file.
+    ///
+    /// Vox writes the file itself from one capture stream, already converted
+    /// to 16 kHz mono, so the file's header always describes its samples.
+    /// `AVCaptureAudioFileOutput` occasionally labelled 16 kHz mono data as
+    /// the device's 48 kHz stereo, which made a whole take unreadable.
+    ///
+    /// - Parameter onBuffer: Optional live tap. Receives the same audio as
+    ///   16 kHz mono Float32 PCM while the file records, on a private queue,
+    ///   for streaming previews and meters. The file is still the source of truth.
     public func start(
         preferredInputDeviceID: String? = nil,
-        filePrefix: String = "vox"
+        filePrefix: String = "vox",
+        onBuffer: (@Sendable (AVAudioPCMBuffer) -> Void)? = nil
     ) async throws -> MicrophoneRecording {
         guard session == nil else {
             throw MicrophoneCaptureError.alreadyRecording
@@ -150,8 +161,26 @@ public actor MicrophoneFileRecorder {
 
         let resolved = try AudioInputDevices.resolve(preferredID: preferredInputDeviceID)
         let input = try AVCaptureDeviceInput(device: resolved.device)
-        let output = AVCaptureAudioFileOutput()
+        let output = AVCaptureAudioDataOutput()
         let session = AVCaptureSession()
+
+        let prefix = normalizedFilePrefix(filePrefix)
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(prefix)-\(UUID().uuidString)")
+            .appendingPathExtension("wav")
+        let file: AVAudioFile
+        do {
+            file = try AVAudioFile(
+                forWriting: url,
+                settings: Self.speechWAVSettings,
+                commonFormat: .pcmFormatFloat32,
+                interleaved: true
+            )
+        } catch {
+            log.error("Unable to create recording file: \(error.localizedDescription)")
+            throw MicrophoneCaptureError.unableToCreateOutput
+        }
+        let sink = MicrophoneSampleSink(file: file, log: log, handler: onBuffer)
 
         session.beginConfiguration()
         guard session.canAddInput(input) else {
@@ -160,6 +189,8 @@ public actor MicrophoneFileRecorder {
         }
         session.addInput(input)
 
+        output.audioSettings = Self.liveBufferSettings
+        output.setSampleBufferDelegate(sink, queue: sink.queue)
         guard session.canAddOutput(output) else {
             session.commitConfiguration()
             throw MicrophoneCaptureError.unableToCreateOutput
@@ -167,59 +198,31 @@ public actor MicrophoneFileRecorder {
         session.addOutput(output)
         session.commitConfiguration()
 
-        let fileType = preferredOutputFileType(for: output)
-        // Pin the file format. Left unset, the writer adopts the first buffer's
-        // format and stops ("Recording Stopped") if the device stream later
-        // switches format, leaving a fraction of a second of audio.
-        if fileType == .wav {
-            output.audioSettings = Self.speechWAVSettings
-        }
-        let prefix = normalizedFilePrefix(filePrefix)
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("\(prefix)-\(UUID().uuidString)")
-            .appendingPathExtension(fileExtension(for: fileType))
-        let delegate = MicrophoneFileRecordingDelegate()
-
         session.startRunning()
-        output.startRecording(to: url, outputFileType: fileType, recordingDelegate: delegate)
 
         self.session = session
         self.output = output
-        self.recordingDelegate = delegate
+        self.sink = sink
         self.currentURL = url
         log.info("Recording started with \(resolved.info.name): \(url.lastPathComponent)")
         return MicrophoneRecording(url: url, inputDevice: resolved.info)
     }
 
     public func stop() async throws -> URL {
-        guard let session, let output, let recordingDelegate, let currentURL else {
+        guard let session, let sink, let currentURL else {
             throw MicrophoneCaptureError.noActiveRecording
         }
-
-        output.stopRecording()
         defer {
-            session.stopRunning()
             self.session = nil
             self.output = nil
-            self.recordingDelegate = nil
+            self.sink = nil
             self.currentURL = nil
         }
 
-        do {
-            let finishedURL = try await recordingDelegate.waitForFinish()
-            log.info("Recording stopped: \(currentURL.lastPathComponent)")
-            return finishedURL
-        } catch {
-            if Self.isRecoverableStopError(error) {
-                if await waitForOutputFile(at: currentURL) {
-                    log.warning("Recording stop reported \(error.localizedDescription); using completed file \(currentURL.lastPathComponent)")
-                    return currentURL
-                }
-                log.warning("Recording stop reported \(error.localizedDescription), but no output file was finalized for \(currentURL.lastPathComponent)")
-            }
-            log.error("Recording stop failed for \(currentURL.lastPathComponent): \(error.localizedDescription)")
-            throw error
-        }
+        session.stopRunning()
+        let frames = sink.finish()
+        log.info("Recording stopped: \(currentURL.lastPathComponent), \(frames) frames")
+        return currentURL
     }
 
     /// Current input loudness, 0 (silence) to 1, for level meters.
@@ -234,11 +237,11 @@ public actor MicrophoneFileRecorder {
 
     public func cancel() {
         let current = currentURL
-        output?.stopRecording()
         session?.stopRunning()
+        sink?.finish()
         session = nil
         output = nil
-        recordingDelegate = nil
+        sink = nil
         currentURL = nil
         if let current {
             try? FileManager.default.removeItem(at: current)
@@ -268,6 +271,7 @@ public actor MicrophoneFileRecorder {
         }
     }
 
+    /// The file on disk: 16 kHz mono 16-bit PCM.
     static var speechWAVSettings: [String: Any] { [
         AVFormatIDKey: kAudioFormatLinearPCM,
         AVSampleRateKey: 16_000,
@@ -278,29 +282,17 @@ public actor MicrophoneFileRecorder {
         AVLinearPCMIsNonInterleaved: false,
     ] }
 
-    private func preferredOutputFileType(for output: AVCaptureAudioFileOutput) -> AVFileType {
-        let fileTypes = AVCaptureAudioFileOutput.availableOutputFileTypes()
-        if fileTypes.contains(.wav) {
-            return .wav
-        }
-        if fileTypes.contains(.m4a) {
-            return .m4a
-        }
-        return fileTypes.first ?? .wav
-    }
-
-    private func fileExtension(for fileType: AVFileType) -> String {
-        switch fileType {
-        case .wav:
-            return "wav"
-        case .m4a:
-            return "m4a"
-        case .aiff:
-            return "aiff"
-        default:
-            return "caf"
-        }
-    }
+    /// The capture stream: 16 kHz mono Float32, converted by AVFoundation
+    /// from whatever the device delivers.
+    static var liveBufferSettings: [String: Any] { [
+        AVFormatIDKey: kAudioFormatLinearPCM,
+        AVSampleRateKey: 16_000,
+        AVNumberOfChannelsKey: 1,
+        AVLinearPCMBitDepthKey: 32,
+        AVLinearPCMIsFloatKey: true,
+        AVLinearPCMIsBigEndianKey: false,
+        AVLinearPCMIsNonInterleaved: false,
+    ] }
 
     private func normalizedFilePrefix(_ value: String) -> String {
         let normalized = value
@@ -308,74 +300,70 @@ public actor MicrophoneFileRecorder {
             .replacingOccurrences(of: "/", with: "-")
         return normalized.isEmpty ? "vox" : normalized
     }
-
-    private func waitForOutputFile(at url: URL, attempts: Int = 5) async -> Bool {
-        for attempt in 0..<attempts {
-            if FileManager.default.fileExists(atPath: url.path) {
-                return true
-            }
-            if attempt < attempts - 1 {
-                try? await Task.sleep(for: .milliseconds(20))
-            }
-        }
-        return false
-    }
 }
 
-private final class MicrophoneFileRecordingDelegate: NSObject, AVCaptureFileOutputRecordingDelegate, @unchecked Sendable {
-    private let lock = NSLock()
-    private var continuation: CheckedContinuation<URL, Error>?
-    private var result: Result<URL, Error>?
+/// Receives the capture stream, appends it to the recording file, and hands
+/// the same buffers to an optional live consumer. Everything runs on `queue`.
+private final class MicrophoneSampleSink: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate, @unchecked Sendable {
+    let queue = DispatchQueue(label: "vox.microphone.capture", qos: .userInitiated)
+    private var file: AVAudioFile?
+    private let log: DualLogger
+    private let handler: (@Sendable (AVAudioPCMBuffer) -> Void)?
+    private var frames: AVAudioFramePosition = 0
+    private var reportedWriteError = false
 
-    func waitForFinish() async throws -> URL {
-        if let result = existingResult() {
-            return try result.get()
-        }
+    init(file: AVAudioFile, log: DualLogger, handler: (@Sendable (AVAudioPCMBuffer) -> Void)?) {
+        self.file = file
+        self.log = log
+        self.handler = handler
+    }
 
-        return try await withCheckedThrowingContinuation { continuation in
-            lock.lock()
-            if let result {
-                lock.unlock()
-                continuation.resume(with: result)
-                return
-            }
-            self.continuation = continuation
-            lock.unlock()
+    /// Closes the file once every buffer already delivered has been written.
+    /// Call after the session stops running. Returns the frames written.
+    @discardableResult
+    func finish() -> AVAudioFramePosition {
+        queue.sync {
+            // Releasing the last reference also finalizes the header on macOS 14.
+            if #available(macOS 15.0, *) { file?.close() }
+            file = nil
+            return frames
         }
     }
 
-    func fileOutput(
-        _ output: AVCaptureFileOutput,
-        didFinishRecordingTo outputFileURL: URL,
-        from connections: [AVCaptureConnection],
-        error: Error?
+    func captureOutput(
+        _ output: AVCaptureOutput,
+        didOutput sampleBuffer: CMSampleBuffer,
+        from connection: AVCaptureConnection
     ) {
-        let result: Result<URL, Error> = if let error {
-            .failure(error)
-        } else {
-            .success(outputFileURL)
-        }
+        guard let description = sampleBuffer.formatDescription else { return }
+        let format = AVAudioFormat(cmAudioFormatDescription: description)
+        let count = AVAudioFrameCount(sampleBuffer.numSamples)
+        guard count > 0,
+              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: count) else { return }
+        buffer.frameLength = count
+        let status = CMSampleBufferCopyPCMDataIntoAudioBufferList(
+            sampleBuffer,
+            at: 0,
+            frameCount: Int32(count),
+            into: buffer.mutableAudioBufferList
+        )
+        guard status == noErr else { return }
 
-        lock.lock()
-        if let continuation {
-            self.continuation = nil
-            lock.unlock()
-            continuation.resume(with: result)
-        } else {
-            self.result = result
-            lock.unlock()
+        if let file {
+            do {
+                try file.write(from: buffer)
+                frames += AVAudioFramePosition(count)
+            } catch where !reportedWriteError {
+                reportedWriteError = true
+                log.error("Recording write failed (\(format) into \(file.processingFormat)): \(error.localizedDescription)")
+            } catch {}
         }
-    }
-
-    private func existingResult() -> Result<URL, Error>? {
-        lock.lock()
-        defer { lock.unlock() }
-        return result
+        handler?(buffer)
     }
 }
 #else
-/// The companion recorder uses `AVCaptureAudioFileOutput`, which Apple only
-/// exposes on macOS. iOS clients compile the shared runtime types but provide
+/// The companion recorder uses `AVCaptureSession` audio capture, which Apple
+/// only exposes this way on macOS. iOS clients compile the shared runtime types but provide
 /// capture through their app layer (for example HudsonVoice's AVAudioEngine
 /// recorder) or a paired Mac runtime.
 public actor MicrophoneFileRecorder {
@@ -385,7 +373,8 @@ public actor MicrophoneFileRecorder {
 
     public func start(
         preferredInputDeviceID: String? = nil,
-        filePrefix: String = "vox"
+        filePrefix: String = "vox",
+        onBuffer: (@Sendable (AVAudioPCMBuffer) -> Void)? = nil
     ) async throws -> MicrophoneRecording {
         throw MicrophoneCaptureError.permissionUnavailable
     }
