@@ -37,7 +37,7 @@ let package = Package(
         ),
         .target(
             name: "VoxEngine",
-            dependencies: ["HudsonSpeechEngine"]
+            dependencies: ["VoxCore", "HudsonSpeechEngine"]
         ),
         .target(
             name: "VoxAppleSpeech",
@@ -82,7 +82,7 @@ let package = Package(
         ),
         .testTarget(
             name: "VoxEngineTests",
-            dependencies: ["HudsonSpeechEngine"]
+            dependencies: ["HudsonSpeechEngine", "VoxEngine"]
         ),
         .testTarget(
             name: "VoxAppleSpeechTests",
