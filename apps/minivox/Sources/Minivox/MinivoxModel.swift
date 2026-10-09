@@ -1,4 +1,6 @@
 import AppKit
+import AVFoundation
+import OSLog
 import Carbon.HIToolbox
 import Combine
 import Foundation
@@ -62,10 +64,16 @@ final class MinivoxModel: ObservableObject {
     @Published private(set) var isCapturingShortcut = false
     @Published private(set) var preferredInputDeviceId = ""
     @Published private(set) var inputDevices: [AudioInputDeviceInfo] = []
+    /// Words streaming in while listening. Shown in the notch, never pasted.
+    @Published private(set) var livePreview = ""
+    /// Whether this dictation has a live preview running.
+    @Published private(set) var hasLivePreview = false
 
     private let asr = EngineManager()
     private let historyRecorder = SpeechHistoryRecorder()
     private let recorder = MicrophoneFileRecorder()
+    private let preview = MinivoxLivePreview()
+    private var previewSession = 0
     private var shortcutController: GlobalShortcutController?
     private var shortcutEventMonitor: Any?
     private var recordingStartedAt: Date?
@@ -98,6 +106,7 @@ final class MinivoxModel: ObservableObject {
             refreshInputDevices()
             refreshMicrophoneAvailability()
             await refreshASRState()
+            await preview.warmUp()
 
             if UserDefaults.standard.bool(forKey: Self.warmUpOnLaunchDefaultsKey), !asrReadyInMemory {
                 await runTask {
@@ -121,6 +130,7 @@ final class MinivoxModel: ObservableObject {
         isRecording = false
         recordingStartedAt = nil
         statusMessage = ""
+        endLivePreview(clear: true)
         Task { await recorder.cancel() }
         setPhase(.idle)
     }
@@ -277,6 +287,8 @@ final class MinivoxModel: ObservableObject {
         statusMessage = ""
 
         setPhase(.transcribing)
+        // Keep the last words on screen while the final text is made.
+        endLivePreview(clear: false)
 
         // Stopping the microphone must never wait behind other work, such as a warm-up.
         Task {
@@ -314,10 +326,20 @@ final class MinivoxModel: ObservableObject {
             NSApplication.shared.activate(ignoringOtherApps: true)
         }
 
+        livePreview = ""
+        previewSession += 1
+        let session = previewSession
+        let onBuffer = await preview.begin { [weak self] text in
+            guard let self, self.previewSession == session else { return }
+            self.livePreview = text
+        }
+        hasLivePreview = onBuffer != nil
+
         do {
             _ = try await recorder.start(
                 preferredInputDeviceID: preferredInputDeviceId,
-                filePrefix: "minivox"
+                filePrefix: "minivox",
+                onBuffer: onBuffer
             )
             let startedAt = Date()
             recordingStartedAt = startedAt
@@ -332,6 +354,7 @@ final class MinivoxModel: ObservableObject {
             statusMessage = ""
             refreshMicrophoneAvailability()
         } catch {
+            endLivePreview(clear: true)
             refreshMicrophoneAvailability()
             lastErrorMessage = error.localizedDescription
             statusMessage = error.localizedDescription
@@ -340,7 +363,8 @@ final class MinivoxModel: ObservableObject {
     }
 
     private func transcribe(_ clip: RecordedClip) async throws {
-        defer { try? FileManager.default.removeItem(at: clip.url) }
+        defer { keepLastRecording(clip.url) }
+        logRecording(clip)
 
         let output = try await asr.transcribe(
             url: clip.url,
@@ -374,9 +398,55 @@ final class MinivoxModel: ObservableObject {
         setPhase(.finished(didPaste ? .pasted : .copied))
     }
 
+    private static let recordingLog = Logger(subsystem: "cc.voxd.minivox", category: "recording")
+
+    /// Logs what the file holds next to how long the user held the key, so a
+    /// short or mangled recording shows up in Console instead of as a lost take.
+    private func logRecording(_ clip: RecordedClip) {
+        let bytes = (try? FileManager.default.attributesOfItem(atPath: clip.url.path)[.size] as? Int) ?? -1
+        guard let file = try? AVAudioFile(forReading: clip.url) else {
+            Self.recordingLog.error("Recording unreadable: \(bytes) bytes, held \(clip.duration, format: .fixed(precision: 1))s")
+            return
+        }
+        let seconds = Double(file.length) / file.fileFormat.sampleRate
+        let message = "Recording \(file.fileFormat.description): "
+            + String(format: "%.1fs in file, held %.1fs, %d bytes", seconds, clip.duration, bytes)
+        if abs(seconds - clip.duration) > 1.5 {
+            Self.recordingLog.error("Length mismatch. \(message, privacy: .public)")
+        } else {
+            Self.recordingLog.notice("\(message, privacy: .public)")
+        }
+    }
+
+    /// Keeps only the latest take, so a bad transcript can be checked against
+    /// what was actually recorded.
+    private func keepLastRecording(_ url: URL) {
+        let fileManager = FileManager.default
+        guard let caches = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first else {
+            try? fileManager.removeItem(at: url)
+            return
+        }
+        let folder = caches.appendingPathComponent("Minivox", isDirectory: true)
+        let destination = folder.appendingPathComponent("last-recording.\(url.pathExtension)")
+        try? fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
+        try? fileManager.removeItem(at: destination)
+        if (try? fileManager.moveItem(at: url, to: destination)) == nil {
+            try? fileManager.removeItem(at: url)
+        }
+    }
+
     /// Microphone loudness (0...1) while recording, for the notch meter.
     func currentInputLevel() async -> Float {
         await recorder.inputLevel() ?? 0
+    }
+
+    private func endLivePreview(clear: Bool) {
+        previewSession += 1
+        if clear {
+            livePreview = ""
+            hasLivePreview = false
+        }
+        Task { await preview.end() }
     }
 
     private func setPhase(_ phase: DictationPhase) {
@@ -388,6 +458,8 @@ final class MinivoxModel: ObservableObject {
             try? await Task.sleep(for: .seconds(1.4))
             guard !Task.isCancelled else { return }
             self?.dictationPhase = .idle
+            self?.livePreview = ""
+            self?.hasLivePreview = false
         }
     }
 

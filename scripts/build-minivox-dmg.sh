@@ -112,6 +112,8 @@ cat > "$BUNDLE/Contents/Info.plist" << PLIST
     <true/>
     <key>NSMicrophoneUsageDescription</key>
     <string>Minivox uses the microphone to turn your dictation into text.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>Minivox shows your words on screen as you speak, on device.</string>
 </dict>
 </plist>
 PLIST
