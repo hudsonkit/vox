@@ -1,6 +1,6 @@
 {
   "name": "@voxd/sdk",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "type": "module",
   "description": "Node and Bun SDK for local transcription and text-to-speech with Vox.",
   "main": "./dist/index.js",
