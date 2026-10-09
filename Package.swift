@@ -42,7 +42,7 @@ let package = Package(
         ),
         .target(
             name: "VoxEngine",
-            dependencies: ["HudsonSpeechEngine"],
+            dependencies: ["VoxCore", "HudsonSpeechEngine"],
             path: "swift/Sources/VoxEngine"
         ),
         .target(
@@ -96,7 +96,7 @@ let package = Package(
         ),
         .testTarget(
             name: "VoxEngineTests",
-            dependencies: ["HudsonSpeechEngine"],
+            dependencies: ["HudsonSpeechEngine", "VoxEngine"],
             path: "swift/Tests/VoxEngineTests"
         ),
         .testTarget(

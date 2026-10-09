@@ -39,7 +39,27 @@ final class ParakeetCoreMLRuntime: @unchecked Sendable, ParakeetRuntime {
             models: loadedModels,
             config: inferenceConfig
         )
+        progress(ModelProgress(modelId: modelId, progress: 0.95, status: "warming"))
+        await prime()
         progress(ModelProgress(modelId: modelId, progress: 1.0, status: "ready"))
+    }
+
+    /// Runs the long-form path once on silence, with every chunk worker busy.
+    ///
+    /// Loading a model does not prepare it for the Neural Engine. Each parallel
+    /// prediction stream is compiled on first use, about 30 s apiece when the
+    /// system cache is cold, so without this the first dictation longer than
+    /// 15 s pays for every compile while the user waits.
+    private func prime() async {
+        let started = Date()
+        let chunks = max(1, inferenceConfig.parallelChunkConcurrency) + 1
+        let silence = [Float](repeating: 0, count: ParakeetConstants.maxModelSamples * chunks)
+        do {
+            _ = try await transcribe(samples: silence)
+            log.info("Parakeet primed in \(Int(Date().timeIntervalSince(started) * 1000)) ms")
+        } catch {
+            log.warning("Parakeet priming failed: \(error.localizedDescription)")
+        }
     }
 
     func transcribe(samples: [Float]) async throws -> ParakeetInferenceResult {

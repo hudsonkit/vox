@@ -56,7 +56,7 @@ interface VoxClientSurface {
   getWarmupStatus(modelId?: string): Promise<unknown>;
   startWarmup(modelId?: string): Promise<unknown>;
   scheduleWarmup(modelId?: string, delayMs?: number): Promise<unknown>;
-  transcribeFile(path: string): Promise<FileTranscriptionResult>;
+  transcribeFile(path: string, modelId?: string): Promise<FileTranscriptionResult>;
   annotateFile(path: string, options?: AnnotationOptions): Promise<FileAnnotationResult>;
   synthesize(text: string, options?: SynthesisOptions): Promise<SynthesisResult>;
   getLiveSessionStatus(): Promise<LiveSessionStatus | null>;

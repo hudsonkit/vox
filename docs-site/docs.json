@@ -5,37 +5,100 @@
       "id": "getting-started",
       "title": "Getting Started",
       "items": [
-        { "id": "overview", "title": "Overview" },
-        { "id": "quickstart", "title": "Quickstart" }
+        {
+          "id": "start",
+          "title": "Start here"
+        },
+        {
+          "id": "start-mac",
+          "title": "Vox on your Mac"
+        },
+        {
+          "id": "start-swift",
+          "title": "Vox in your app"
+        },
+        {
+          "id": "start-node",
+          "title": "Vox for Node"
+        },
+        {
+          "id": "start-browser",
+          "title": "Vox for the browser"
+        },
+        {
+          "id": "start-agent",
+          "title": "Build with an agent"
+        }
       ]
     },
     {
       "id": "integrations",
-      "title": "Integration Modes",
+      "title": "Reference",
       "items": [
-        { "id": "apple-embed", "title": "Swift Embed" },
-        { "id": "sdk", "title": "Companion SDK" },
-        { "id": "web-integration", "title": "Web SDK" }
+        {
+          "id": "overview",
+          "title": "Overview"
+        },
+        {
+          "id": "apple-embed",
+          "title": "Swift embed"
+        },
+        {
+          "id": "sdk",
+          "title": "Node SDK"
+        },
+        {
+          "id": "web-integration",
+          "title": "Browser client"
+        },
+        {
+          "id": "quickstart",
+          "title": "Command line"
+        }
       ]
     },
     {
       "id": "runtime",
       "title": "Runtime",
       "items": [
-        { "id": "runtime", "title": "Runtime" },
-        { "id": "models", "title": "Models and plugins" },
-        { "id": "architecture", "title": "Architecture" },
-        { "id": "providers", "title": "Provider Protocol" },
-        { "id": "observability", "title": "Observability" },
-        { "id": "api", "title": "API" }
+        {
+          "id": "runtime",
+          "title": "Runtime"
+        },
+        {
+          "id": "models",
+          "title": "Models and plugins"
+        },
+        {
+          "id": "architecture",
+          "title": "Architecture"
+        },
+        {
+          "id": "providers",
+          "title": "Provider Protocol"
+        },
+        {
+          "id": "observability",
+          "title": "Observability"
+        },
+        {
+          "id": "api",
+          "title": "API"
+        }
       ]
     },
     {
       "id": "agents",
       "title": "For Agents",
       "items": [
-        { "id": "agents", "title": "Agent Guide" },
-        { "id": "skill", "title": "Operator Playbook" }
+        {
+          "id": "agents",
+          "title": "Agent Guide"
+        },
+        {
+          "id": "skill",
+          "title": "Operator Playbook"
+        }
       ]
     }
   ]

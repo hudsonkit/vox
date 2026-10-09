@@ -1,6 +1,6 @@
 ---
-title: Quickstart
-description: Install Vox Companion, verify runtime health, and exercise transcription, synthesis, and performance tools.
+title: Command line
+description: Install Vox on your Mac, check its health, and exercise transcription, speech, preload and timings from the terminal.
 ---
 
 ## Prerequisites
@@ -13,10 +13,12 @@ description: Install Vox Companion, verify runtime health, and exercise transcri
 ## Install and verify
 
 ```bash
-npm install -g @voxd/cli
+bun add -g @voxd/cli     # or: npm install -g @voxd/cli
 vox install
-vox doctor       # expect ready: true
+vox doctor               # expect ready: true
 ```
+
+To run a command without installing, use `bunx @voxd/cli@latest <command>`.
 
 `vox install` registers the LaunchAgent for an existing `voxd` binary. The simplest path is to install `Vox.dmg` first, then run the CLI.
 
@@ -75,10 +77,10 @@ vox transcribe status
 
 ## Next steps
 
-If you are integrating Vox into a macOS or iOS app, read the [Swift Embed Guide](./apple-embed.md).
+If you are integrating Vox into a macOS or iOS app, start with [Vox in your app](./start-swift.md).
 
 If you are choosing a dictation model or installing Gemma, read [Models and plugins](./models.md).
 
 If you are wiring external STT or TTS engines into Vox Companion, read the [Provider Protocol](./providers.md).
 
-Try [Minivox](https://github.com/arach/vox/tree/main/apps/minivox), the small menu-bar dictation app built directly on Vox. The [transcribe TUI](https://github.com/arach/vox/tree/main/examples/transcribe-tui) remains the companion-connected terminal sample.
+Try [Minivox](https://github.com/hudsonkit/vox/tree/main/apps/minivox), the small menu-bar dictation app built directly on Vox. The [transcribe TUI](https://github.com/hudsonkit/vox/tree/main/examples/transcribe-tui) remains the companion-connected terminal sample.

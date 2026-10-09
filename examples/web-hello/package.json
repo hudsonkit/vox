@@ -1,0 +1,12 @@
+{
+  "name": "vox-web-hello",
+  "private": true,
+  "type": "module",
+  "description": "A web page that dictates and transcribes through Vox on your Mac",
+  "scripts": {
+    "start": "bun --port 3000 index.html"
+  },
+  "dependencies": {
+    "@voxd/client": "file:../../packages/web-client"
+  }
+}
