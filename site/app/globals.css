@@ -83,3 +83,134 @@ a {
     scroll-behavior: auto;
   }
 }
+
+/* Minivox notch demo: closed is the camera housing; open drops below it. */
+.vox-notch {
+  --open-width: calc(100% - 40px);
+  width: 34%;
+  height: 26px;
+  border-radius: 0 0 9px 9px;
+  overflow: hidden;
+  box-shadow: 0 0 0 rgba(0, 0, 0, 0);
+  transition:
+    width 0.42s cubic-bezier(0.32, 1.25, 0.5, 1),
+    height 0.42s cubic-bezier(0.25, 1, 0.4, 1),
+    border-radius 0.42s ease,
+    box-shadow 0.3s ease;
+}
+
+.vox-notch-surface {
+  background: #000;
+  transition: background 0.3s ease;
+}
+
+.vox-notch-glow {
+  background: radial-gradient(ellipse 60% 90% at 50% 100%, rgba(232, 154, 60, 0.22), rgba(232, 154, 60, 0));
+}
+
+.vox-notch-content {
+  opacity: 0;
+  filter: blur(3px);
+  transition: opacity 0.18s ease, filter 0.18s ease;
+}
+
+.vox-words-row {
+  opacity: 0;
+  transform: translateY(-5px);
+  transition: opacity 0.28s ease-out 0.06s, transform 0.28s ease-out 0.06s;
+}
+
+.vox-words-row[data-overflow="true"] {
+  mask-image: linear-gradient(90deg, transparent, #000 22%);
+}
+
+.vox-words-strip {
+  transition: transform 0.34s cubic-bezier(0.25, 1, 0.4, 1);
+}
+
+.vox-word {
+  animation: vox-word-in 0.3s ease-out both;
+  transition: opacity 0.3s ease;
+}
+
+@keyframes vox-word-in {
+  from { opacity: 0; transform: translateX(8px); }
+}
+
+[data-phase="opening"] .vox-notch,
+[data-phase="listening"] .vox-notch,
+[data-phase="collapsing"] .vox-notch {
+  width: var(--open-width);
+  height: 51px;
+  border-radius: 0 0 15px 15px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45), inset 0 -1px 0 rgba(255, 255, 255, 0.11);
+}
+
+[data-phase="listening"] .vox-notch,
+[data-phase="collapsing"] .vox-notch {
+  height: 71px;
+  transition:
+    width 0.42s cubic-bezier(0.32, 1.25, 0.5, 1),
+    height 0.42s cubic-bezier(0.22, 1, 0.36, 1),
+    border-radius 0.42s ease,
+    box-shadow 0.3s ease;
+}
+
+[data-phase="opening"] .vox-notch-surface,
+[data-phase="listening"] .vox-notch-surface,
+[data-phase="collapsing"] .vox-notch-surface {
+  background: linear-gradient(180deg, #000 36%, rgba(0, 0, 0, 0.62) 58%, rgba(19, 19, 19, 0.55));
+  backdrop-filter: blur(14px);
+}
+
+[data-phase="opening"] .vox-notch-content,
+[data-phase="listening"] .vox-notch-content {
+  opacity: 1;
+  filter: none;
+  transition-delay: 0.09s;
+}
+
+[data-phase="collapsing"] .vox-notch-content {
+  opacity: 1;
+  filter: none;
+}
+
+[data-phase="collapsing"] .vox-notch-content > :first-child,
+[data-phase="collapsing"] .vox-notch-content .grid {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+[data-phase="listening"] .vox-words-row {
+  opacity: 1;
+  transform: none;
+}
+
+.vox-pasted:not(:empty) {
+  animation: vox-paste 0.6s ease-out both;
+}
+
+@keyframes vox-paste {
+  from { background: rgba(239, 68, 68, 0.18); }
+  to { background: transparent; }
+}
+
+.vox-caret {
+  animation: vox-caret 1.1s steps(1) infinite;
+}
+
+@keyframes vox-caret {
+  50% { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vox-notch,
+  .vox-notch-content,
+  .vox-words-row,
+  .vox-words-strip,
+  .vox-word,
+  .vox-caret {
+    transition: none;
+    animation: none;
+  }
+}

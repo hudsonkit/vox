@@ -4,7 +4,7 @@ import Link from "next/link";
 import { ArrowUpRight, Check, CheckCircle2, Download, Github, Mic, ShieldCheck, TerminalSquare } from "lucide-react";
 import { CopyCommand } from "../../components/copy-command";
 
-const dmgUrl = "https://github.com/arach/vox/releases/latest/download/Vox.dmg";
+const dmgUrl = "https://github.com/hudsonkit/vox/releases/latest/download/Vox.dmg";
 
 export const metadata: Metadata = {
   title: "Download Vox",
@@ -43,7 +43,7 @@ export default function DownloadPage() {
             <Link href="/web" className="px-2.5 py-1.5 transition-colors hover:text-accent">Web SDK</Link>
             <Link href="/minivox" className="px-2.5 py-1.5 transition-colors hover:text-accent">Minivox</Link>
             <Link href="/blog" className="px-2.5 py-1.5 transition-colors hover:text-accent">Blog</Link>
-            <Link href="https://github.com/arach/vox" target="_blank" rel="noreferrer noopener" className="px-2.5 py-1.5 transition-colors hover:text-accent">GitHub</Link>
+            <Link href="https://github.com/hudsonkit/vox" target="_blank" rel="noreferrer noopener" className="px-2.5 py-1.5 transition-colors hover:text-accent">GitHub</Link>
           </nav>
         </div>
       </header>
@@ -68,7 +68,7 @@ export default function DownloadPage() {
                 Download Vox.dmg
               </Link>
               <Link
-                href="https://github.com/arach/vox/releases/latest"
+                href="https://github.com/hudsonkit/vox/releases/latest"
                 target="_blank"
                 rel="noreferrer noopener"
                 className="inline-flex h-11 items-center gap-2 rounded-sm border border-line-strong bg-panel px-4 font-mono text-[12px] uppercase tracking-[0.06em] text-ink transition-colors hover:text-accent"
@@ -234,7 +234,7 @@ export default function DownloadPage() {
           <span>voxd.cc/download</span>
           <div className="flex gap-5">
             <Link href="/docs/quickstart" className="transition-colors hover:text-accent">/quickstart</Link>
-            <Link href="https://github.com/arach/vox" target="_blank" rel="noreferrer noopener" className="inline-flex items-center gap-2 transition-colors hover:text-accent">
+            <Link href="https://github.com/hudsonkit/vox" target="_blank" rel="noreferrer noopener" className="inline-flex items-center gap-2 transition-colors hover:text-accent">
               <Github className="h-3 w-3" />
               /github
             </Link>
