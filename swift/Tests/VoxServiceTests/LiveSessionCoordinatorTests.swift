@@ -107,7 +107,12 @@ struct LiveSessionCoordinatorTests {
         )
 
         coordinator.startStartingTimer(timeout: 0.01)
-        try await Task.sleep(for: .milliseconds(60))
+        // The timer runs at utility QoS, so a busy parallel test run can delay
+        // it well past the timeout. Wait for it to fire instead of guessing.
+        let deadline = ContinuousClock.now + .seconds(2)
+        while probe.value() == nil, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
 
         #expect(coordinator.current(id: nil) == nil)
         #expect(probe.value() == session.sessionId)
