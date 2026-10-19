@@ -60,6 +60,8 @@ public final class ServiceBridge: @unchecked Sendable {
     private let authToken: String?
     private let queue: DispatchQueue
     private let lock = NSLock()
+    private let socketPath: String?
+    private var privateServer: PrivateWebSocketServer?
     private var listener: NWListener?
     private var connections: [NWConnection] = []
     private var handlers: [String: Handler] = [:]
@@ -69,8 +71,10 @@ public final class ServiceBridge: @unchecked Sendable {
         port: UInt16,
         serviceName: String,
         bindAddress: String = VoxDefaults.host,
-        authToken: String? = nil
+        authToken: String? = nil,
+        socketPath: String? = nil
     ) {
+        self.socketPath = socketPath
         self.port = port
         self.bindAddress = bindAddress
         self.serviceName = serviceName
@@ -91,15 +95,28 @@ public final class ServiceBridge: @unchecked Sendable {
     }
 
     public func start() throws {
+        if let socketPath {
+            guard let authToken else { throw POSIXError(.EACCES) }
+            let server = PrivateWebSocketServer(path: socketPath, token: authToken, receive: { [weak self] data, connectionID, reply in
+                guard let self, let text = String(data: data, encoding: .utf8) else { return }
+                self.dispatchMessage(text, connectionID: connectionID, authenticate: false) { object in
+                    if let data = try? JSONSerialization.data(withJSONObject: object) { reply(data) }
+                }
+            }, disconnected: { [weak self] connectionID in self?.onClientDisconnected?(connectionID) })
+            try server.start()
+            privateServer = server
+            return
+        }
         let parameters = NWParameters.tcp
         parameters.allowLocalEndpointReuse = true
+        parameters.requiredLocalEndpoint = .hostPort(host: NWEndpoint.Host(bindAddress), port: .init(rawValue: port)!)
 
         let wsOptions = NWProtocolWebSocket.Options()
         wsOptions.autoReplyPing = true
         parameters.defaultProtocolStack.applicationProtocols.insert(wsOptions, at: 0)
 
         do {
-            listener = try NWListener(using: parameters, on: .init(rawValue: port)!)
+            listener = try NWListener(using: parameters)
         } catch {
             log.error("Failed to create WebSocket listener: \(error.localizedDescription)")
             throw error
@@ -139,6 +156,7 @@ public final class ServiceBridge: @unchecked Sendable {
     }
 
     public func stop() {
+        privateServer?.stop(); privateServer = nil
         listener?.cancel()
         listener = nil
         queue.sync {
@@ -231,92 +249,41 @@ public final class ServiceBridge: @unchecked Sendable {
     }
 
     private func handleMessage(_ text: String, on connection: NWConnection) {
-        guard
-            let data = text.data(using: .utf8),
-            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else {
-            sendError(id: nil, message: "Invalid JSON", on: connection)
-            return
+        dispatchMessage(text, connectionID: "\(ObjectIdentifier(connection).hashValue)", authenticate: true) { [weak self, weak connection] object in
+            guard let self, let connection else { return }
+            self.sendJSON(object, on: connection)
         }
+    }
 
+    private func dispatchMessage(_ text: String, connectionID: String, authenticate: Bool,
+                                 send: @escaping @Sendable ([String: Any]) -> Void) {
+        guard let data = text.data(using: .utf8), let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            send(["error": "Invalid JSON"]); return
+        }
         let id = object["id"] as? String
-        guard let method = object["method"] as? String else {
-            sendError(id: id, message: "Missing method", on: connection)
-            return
+        let reply: @Sendable ([String: Any]?, String?) -> Void = { result, error in
+            var payload: [String: Any] = [:]
+            if let id { payload["id"] = id }
+            if let error { payload["error"] = error } else { payload["result"] = result ?? [:] }
+            send(payload)
         }
-
+        guard let method = object["method"] as? String else { reply(nil, "Missing method"); return }
         var params = object["params"] as? [String: Any] ?? [:]
-        if let authToken, !Self.isAuthorized(object: object, params: params, token: authToken) {
-            sendError(id: id, message: "Unauthorized", on: connection)
-            return
+        if authenticate, let authToken, !Self.isAuthorized(object: object, params: params, token: authToken) {
+            reply(nil, "Unauthorized"); return
         }
-        params.removeValue(forKey: "authToken")
-        params.removeValue(forKey: "_authToken")
-        params.removeValue(forKey: "token")
-
-        let connectionID = "\(ObjectIdentifier(connection).hashValue)"
+        for key in ["authToken", "_authToken", "token"] { params.removeValue(forKey: key) }
         params["_connectionID"] = connectionID
-        if shouldLogRequest(method) {
-            log.info("Bridge received request method=\(method) id=\(id ?? "none") connectionId=\(connectionID)")
-        }
-
-        lock.lock()
-        let streamingHandler = streamingHandlers[method]
-        let handler = handlers[method]
-        lock.unlock()
-
-        if let streamingHandler {
-            streamingHandler(
-                params,
-                { [weak self, weak connection] event, data in
-                    guard let self, let connection else { return }
-                    var payload: [String: Any] = ["event": event, "data": data]
-                    if let id {
-                        payload["id"] = id
-                    }
-                    self.sendJSON(payload, on: connection)
-                },
-                { [weak self, weak connection] result, error in
-                    guard let self else { return }
-                    guard let connection else {
-                        self.log.warning("Bridge dropped streaming reply method=\(method) id=\(id ?? "none") connectionId=\(connectionID) reason=connection_released")
-                        return
-                    }
-                    if let error {
-                        self.log.error("Bridge sending streaming error method=\(method) id=\(id ?? "none") connectionId=\(connectionID) error=\(error)")
-                        self.sendError(id: id, message: error, on: connection)
-                    } else {
-                        if self.shouldLogRequest(method) {
-                            self.log.info("Bridge sending streaming result method=\(method) id=\(id ?? "none") connectionId=\(connectionID)")
-                        }
-                        self.sendResult(id: id, result: result ?? [:], on: connection)
-                    }
-                }
-            )
-            return
-        }
-
-        if let handler {
-            handler(params) { [weak self, weak connection] result, error in
-                guard let self else { return }
-                guard let connection else {
-                    self.log.warning("Bridge dropped reply method=\(method) id=\(id ?? "none") connectionId=\(connectionID) reason=connection_released")
-                    return
-                }
-                if let error {
-                    self.log.error("Bridge sending error method=\(method) id=\(id ?? "none") connectionId=\(connectionID) error=\(error)")
-                    self.sendError(id: id, message: error, on: connection)
-                } else {
-                    if self.shouldLogRequest(method) {
-                        self.log.info("Bridge sending result method=\(method) id=\(id ?? "none") connectionId=\(connectionID)")
-                    }
-                    self.sendResult(id: id, result: result ?? [:], on: connection)
-                }
-            }
-            return
-        }
-
-        sendError(id: id, message: "Unknown method: \(method)", on: connection)
+        if shouldLogRequest(method) { log.info("Bridge received request method=\(method) id=\(id ?? "none") connectionId=\(connectionID)") }
+        lock.lock(); let streaming = streamingHandlers[method]; let handler = handlers[method]; lock.unlock()
+        if let streaming {
+            streaming(params, { event, data in
+                var payload: [String: Any] = ["event": event, "data": data]
+                if let id { payload["id"] = id }
+                send(payload)
+            }, reply)
+        } else if let handler { handler(params, reply) }
+        else { reply(nil, "Unknown method: \(method)") }
     }
 
     private func shouldLogRequest(_ method: String) -> Bool {

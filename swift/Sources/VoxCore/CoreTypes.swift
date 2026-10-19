@@ -5,25 +5,29 @@ public struct RuntimeInfo: Codable, Sendable, Equatable {
     public let version: String
     public let serviceName: String
     public let port: UInt16
+    public let socketPath: String?
     public let pid: Int32
     public let startedAt: Date
 
-    public init(version: String, serviceName: String, port: UInt16, pid: Int32, startedAt: Date) {
+    public init(version: String, serviceName: String, port: UInt16, pid: Int32, startedAt: Date, socketPath: String? = nil) {
         self.version = version
         self.serviceName = serviceName
-        self.port = port
+        self.port = socketPath == nil ? port : 0
+        self.socketPath = socketPath
         self.pid = pid
         self.startedAt = startedAt
     }
 
     public func dictionaryValue() -> [String: Any] {
-        [
+        var value: [String: Any] = [
             "version": version,
             "serviceName": serviceName,
             "port": Int(port),
             "pid": Int(pid),
             "startedAt": ISO8601DateFormatter().string(from: startedAt)
         ]
+        if let socketPath { value["socketPath"] = socketPath; value["transport"] = "unix+ws+json-rpc" }
+        return value
     }
 }
 
