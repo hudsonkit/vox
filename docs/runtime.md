@@ -108,6 +108,14 @@ Cancelled synthesis sessions are currently recorded as `synthesize.startSession`
 
 Speech sessions are coordinated in `VoxService`. Session ownership ties to both `connectionID` and `clientId`. Stop and cancel are distinct operations. Final transcript events include metrics and word-level timestamps. Synthesis session status includes the selected model and voice. Active session state is inspectable for operator recovery.
 
+## Private local transport
+
+A host app can construct `VoxRuntimeService` or `ServiceBridge` with `socketPath` and a nonempty `authToken`. This mode opens a Unix socket and does not open a TCP listener. Existing constructors without `socketPath` retain their TCP behavior.
+
+The socket directory must be owned by the current user. The runtime creates it with mode `0700`, creates the socket with mode `0600`, rejects symlink paths, and checks the connected peer UID. Clients must send `x-lattices-token` during WebSocket upgrade. The server rejects browser `Origin` headers, invalid `Host` headers, duplicate headers, and unauthorized upgrades before RPC dispatch. Use `Host: localhost` and request path `/`.
+
+Private connections retain the same JSON-RPC methods, events, and connection ownership. The transport limits incoming frames to 16 MiB and queued output to 32 MiB. The runtime registry reports `port: 0` and `socketPath` for a private endpoint. The host owns capability publication and client discovery; the standalone CLI and browser bridge continue to use their existing TCP configuration.
+
 ## Configuration
 
 Ports and bind address are configurable via environment variables.

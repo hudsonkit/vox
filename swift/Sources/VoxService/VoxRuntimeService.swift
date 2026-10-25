@@ -5,6 +5,7 @@ import HudsonSpeechEngine
 public final class VoxRuntimeService: @unchecked Sendable {
     private let log = VoxLog.service
     private let port: UInt16
+    private let socketPath: String?
     private let bridge: ServiceBridge
     private let asrEngine: EngineManager
     private let annotationEngine: AnnotationManager
@@ -30,12 +31,14 @@ public final class VoxRuntimeService: @unchecked Sendable {
         history: SpeechHistoryRecorder = SpeechHistoryRecorder(),
         defaultSynthesisModelId: String = TTSDefaults.modelId,
         authToken: String? = nil,
+        socketPath: String? = nil,
         preferencesLoader: @escaping @Sendable () -> VoxPreferences = {
             (try? VoxPreferences.load()) ?? VoxPreferences()
         }
     ) {
-        self.port = port
-        self.bridge = ServiceBridge(port: port, serviceName: "Vox", bindAddress: bindAddress, authToken: authToken)
+        self.port = socketPath == nil ? port : 0
+        self.socketPath = socketPath
+        self.bridge = ServiceBridge(port: port, serviceName: "Vox", bindAddress: bindAddress, authToken: authToken, socketPath: socketPath)
         self.asrEngine = engine
         self.annotationEngine = annotationEngine
         self.ttsEngine = ttsEngine
@@ -53,7 +56,8 @@ public final class VoxRuntimeService: @unchecked Sendable {
             serviceName: "Vox",
             port: port,
             pid: getpid(),
-            startedAt: startedAt
+            startedAt: startedAt,
+            socketPath: socketPath
         )
         try RuntimeRegistry.write(runtime)
 
