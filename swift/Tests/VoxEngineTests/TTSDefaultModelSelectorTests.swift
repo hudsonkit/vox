@@ -3,6 +3,19 @@ import VoxCore
 @testable import HudsonSpeechEngine
 
 struct TTSDefaultModelSelectorTests {
+    @Test("explicit blank ElevenLabs config fences ambient keys in default selection")
+    func elevenBlankConfigDoesNotSelectAmbientAccount() {
+        for value in ["", "   "] {
+            let config = ProvidersConfig(providers: [
+                ProviderEntry(id: "avspeech", kind: .tts, builtin: true, models: [TTSDefaults.localModelId]),
+                ProviderEntry(id: "elevenlabs", kind: .tts, builtin: true,
+                    models: ElevenLabsTTSProvider.supportedModelIDs, env: ["ELEVENLABS_API_KEY": value])
+            ])
+            #expect(TTSDefaultModelSelector.defaultModelId(for: config,
+                environment: ["ELEVENLABS_API_KEY": "ambient-test-key"]) == TTSDefaults.localModelId)
+        }
+    }
+
     @Test("default selector falls back to AVSpeech when OpenAI has no API key")
     func skipsOpenAIWithoutAPIKey() {
         let config = ProvidersConfig(providers: [
