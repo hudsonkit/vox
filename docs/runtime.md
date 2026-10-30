@@ -165,7 +165,7 @@ See [Architecture](./architecture.md) for layer ownership and [Observability](./
 
 ## Native PCM streaming
 
-Use the app-captured PCM routes for model-backed partial text. These routes are separate from the existing daemon-microphone `transcribe.startSession` routes. The app owns microphone permission, capture, and conversion to mono 16 kHz float32 PCM. Vox owns inference, decoder state, word timings, and endpoint detection.
+Use the app-captured PCM routes for model-backed partial text. The live default is `nemotron:unified-560ms` (Nemotron Labs Unified); file transcription remains `parakeet:v3`. These routes are separate from the existing daemon-microphone `transcribe.startSession` routes. The app owns microphone permission, capture, and conversion to mono 16 kHz float32 PCM. Vox owns inference, decoder state, word timings, and endpoint detection.
 
 For several apps, run one `voxd` and connect through its authenticated private Unix transport. Set `VOX_SOCKET_PATH` and `VOX_AUTH_TOKEN` in the host environment; private mode requires both and opens no TCP listener. Do not launch one daemon per app. For a single-process app, use `NativeStreamingASR.shared` from `VoxEngine` instead. Both surfaces use the same Swift/Core ML implementation. Neither uses Python, MLX, or the FluidAudio package.
 

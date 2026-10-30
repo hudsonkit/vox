@@ -182,9 +182,11 @@ public final class StdioTransport: @unchecked Sendable {
 
     private func startReadingStdout(_ pipe: Pipe) {
         let handle = pipe.fileHandleForReading
-        // FileHandle.availableData blocks. It must not occupy Swift's bounded
-        // cooperative executor, which also runs callers and their timeout continuations.
-        DispatchQueue.global(qos: .utility).async { [weak self] in
+        // FileHandle.availableData blocks. Use a dedicated thread, not Swift's
+        // cooperative executor or GCD's bounded global worker pool: both must
+        // remain available to callers, timeout continuations, and message dispatch.
+        Thread.detachNewThread { [weak self] in
+            Thread.current.name = "Vox provider stdout"
             var buffer = Data()
             while self?.processIsRunning == true {
                 let chunk = handle.availableData
@@ -208,7 +210,8 @@ public final class StdioTransport: @unchecked Sendable {
 
     private func startReadingStderr(_ pipe: Pipe) {
         let handle = pipe.fileHandleForReading
-        DispatchQueue.global(qos: .utility).async { [weak self] in
+        Thread.detachNewThread { [weak self] in
+            Thread.current.name = "Vox provider stderr"
             while self?.processIsRunning == true {
                 let chunk = handle.availableData
                 if chunk.isEmpty { break }

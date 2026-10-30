@@ -46,6 +46,6 @@ public struct StreamingASRUpdate: Codable, Sendable, Equatable {
 }
 
 public enum StreamingASRDefaults {
-  public static let modelId = "nemotron:streaming-560ms"
+  public static let modelId = "nemotron:unified-560ms"
   public static let idleUnloadSeconds: Double = 60
 }

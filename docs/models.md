@@ -21,7 +21,7 @@ These families run without a plugin:
 
 | Family | Default or typical ids | How it runs |
 |---|---|---|
-| `coreml-streaming` | `nemotron:streaming-560ms`, `parakeet:eou-320ms` | Native Swift/Core ML streaming; verified ANE encoder |
+| `coreml-streaming` | `nemotron:unified-560ms` (default live), `parakeet:eou-320ms` | Native Swift/Core ML streaming; verified ANE encoder |
 | `parakeet-tdt` | `parakeet:v3` (default), `parakeet:v2` (English) | On-device CoreML |
 | `apple-speech` | `apple:speech-transcriber` | On-device Speech framework; macOS 26+ |
 | `openai-transcribe` | `gpt-transcribe`, `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, `whisper-1` | OpenAI Audio API; needs `OPENAI_API_KEY` |
@@ -33,7 +33,9 @@ Apple SpeechTranscriber is registered by the default daemon, so selecting its mo
 
 ## Current local shortlist
 
-- `parakeet:v3`: default, mature CoreML path, 25 European languages.
+- `nemotron:unified-560ms`: default native live model, October 28 Core ML conversion, 25 European languages. Buffered streaming with a 160 ms stride and 400 ms right context.
+- `nemotron:streaming-560ms`: cache-aware Nemotron 3.5 Latin alternative when earlier first partials matter more than the measured quality/memory advantage of Unified.
+- `parakeet:v3`: default file model, mature CoreML path, 25 European languages.
 - `apple:speech-transcriber`: system-managed on-device parity option with word timings on macOS 26+.
 - `mlx-community/Qwen3-ASR-1.7B-8bit`: multilingual accuracy candidate on Apple Silicon.
 - `mlx-community/cohere-transcribe-03-2026-mlx-8bit`: strong offline multilingual candidate; not a realtime model.

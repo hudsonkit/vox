@@ -420,7 +420,7 @@
       "runtime": "coreml",
       "status": "ready",
       "languages": "English, Spanish, French, Italian, Portuguese, German",
-      "notes": "Default native streaming. Cache-aware ANE encoder, cumulative partials and greedy emission-frame word timings. End-of-utterance uses 1120 ms of RNNT blank duration, not a trained EOU token. English-US is the companion default; language-selectable embedded preload.",
+      "notes": "Cache-aware native streaming alternative to Unified. Cache-aware ANE encoder, cumulative partials and greedy emission-frame word timings. End-of-utterance uses 1120 ms of RNNT blank duration, not a trained EOU token. English-US is the companion default; language-selectable embedded preload.",
       "platforms": ["macOS 14.4+", "iOS 17.4+"],
       "architectures": ["arm64"],
       "capabilities": {
@@ -505,6 +505,30 @@
         "type": "huggingface",
         "repo": "FluidInference/parakeet-realtime-eou-120m-coreml",
         "revision": "40a23f4c0b333aa17ad8c0f2ea47ec2347f2f355"
+      }
+    },
+    {
+      "id": "nemotron:unified-560ms",
+      "kind": "asr",
+      "family": "coreml-streaming",
+      "name": "Nemotron Labs Unified 0.6B 560 ms",
+      "vendor": "nvidia",
+      "runtime": "coreml",
+      "status": "ready",
+      "languages": "25 European languages",
+      "notes": "Default native live model. October 28 Core ML int8 conversion. Buffered streaming: 160 ms stride, 400 ms right context, up to 6.16 s rolling encoder window. Model-backed cumulative partials and approximate RNNT word timestamps; blank-duration endpointing. English-US companion default; language-selectable embedded preload.",
+      "platforms": ["macOS 14.4+", "iOS 17.4+"],
+      "architectures": ["arm64"],
+      "capabilities": {
+        "fileTranscription": true,
+        "liveTranscription": true,
+        "onDevice": true,
+        "wordTimestamps": true
+      },
+      "source": {
+        "type": "huggingface",
+        "repo": "FluidInference/nemotron-labs-unified-asr-0.6b-coreml",
+        "revision": "bd13ddde81d3134719c520845346b3252daf3175"
       }
     }
   ]

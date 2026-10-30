@@ -1096,7 +1096,7 @@ See [Architecture](./architecture.md) for layer ownership and [Observability](./
 
 ## Native PCM streaming
 
-Use the app-captured PCM routes for model-backed partial text. These routes are separate from the existing daemon-microphone `transcribe.startSession` routes. The app owns microphone permission, capture, and conversion to mono 16 kHz float32 PCM. Vox owns inference, decoder state, word timings, and endpoint detection.
+Use the app-captured PCM routes for model-backed partial text. The live default is `nemotron:unified-560ms` (Nemotron Labs Unified); file transcription remains `parakeet:v3`. These routes are separate from the existing daemon-microphone `transcribe.startSession` routes. The app owns microphone permission, capture, and conversion to mono 16 kHz float32 PCM. Vox owns inference, decoder state, word timings, and endpoint detection.
 
 For several apps, run one `voxd` and connect through its authenticated private Unix transport. Set `VOX_SOCKET_PATH` and `VOX_AUTH_TOKEN` in the host environment; private mode requires both and opens no TCP listener. Do not launch one daemon per app. For a single-process app, use `NativeStreamingASR.shared` from `VoxEngine` instead. Both surfaces use the same Swift/Core ML implementation. Neither uses Python, MLX, or the FluidAudio package.
 
@@ -1160,7 +1160,7 @@ These families run without a plugin:
 
 | Family | Default or typical ids | How it runs |
 |---|---|---|
-| `coreml-streaming` | `nemotron:streaming-560ms`, `parakeet:eou-320ms` | Native Swift/Core ML streaming; verified ANE encoder |
+| `coreml-streaming` | `nemotron:unified-560ms` (default live), `parakeet:eou-320ms` | Native Swift/Core ML streaming; verified ANE encoder |
 | `parakeet-tdt` | `parakeet:v3` (default), `parakeet:v2` (English) | On-device CoreML |
 | `apple-speech` | `apple:speech-transcriber` | On-device Speech framework; macOS 26+ |
 | `openai-transcribe` | `gpt-transcribe`, `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, `whisper-1` | OpenAI Audio API; needs `OPENAI_API_KEY` |
@@ -1172,7 +1172,9 @@ Apple SpeechTranscriber is registered by the default daemon, so selecting its mo
 
 ## Current local shortlist
 
-- `parakeet:v3`: default, mature CoreML path, 25 European languages.
+- `nemotron:unified-560ms`: default native live model, October 28 Core ML conversion, 25 European languages. Buffered streaming with a 160 ms stride and 400 ms right context.
+- `nemotron:streaming-560ms`: cache-aware Nemotron 3.5 Latin alternative when earlier first partials matter more than the measured quality/memory advantage of Unified.
+- `parakeet:v3`: default file model, mature CoreML path, 25 European languages.
 - `apple:speech-transcriber`: system-managed on-device parity option with word timings on macOS 26+.
 - `mlx-community/Qwen3-ASR-1.7B-8bit`: multilingual accuracy candidate on Apple Silicon.
 - `mlx-community/cohere-transcribe-03-2026-mlx-8bit`: strong offline multilingual candidate; not a realtime model.
@@ -3208,6 +3210,9 @@ Source: docs/agent/models.agent.md
 - CoreML streaming installation is disk-only; preload explicitly loads/primes; idle unload default 60 s.
 - Batch and streaming share one process-wide native model slot; multiple app processes use one authenticated private Unix host.
 
+- Current live default: nemotron:unified-560ms (Nemotron Labs Unified, Oct 28 conversion bd13ddd); 160 ms stride + 400 ms right context, buffered re-encode, not encoder-cache streaming.
+- Nemotron 3.5 Latin cache-aware alternative: nemotron:streaming-560ms, 560 ms chunks.
+
 # Observability Facts
 
 Source: docs/agent/observability.agent.md
@@ -3381,6 +3386,8 @@ Source: docs/agent/runtime.agent.md
 - Private Unix transport is intentional cross-process mode for Talkie and other app processes.
 
 - Standalone voxd: set VOX_SOCKET_PATH + VOX_AUTH_TOKEN for the same private transport; no TCP listener in that mode.
+
+- Current StreamingASRDefaults.modelId: nemotron:unified-560ms; new Native provider is included when loading legacy custom ASR provider configurations unless the same provider id is explicitly configured.
 
 # SDK Facts
 

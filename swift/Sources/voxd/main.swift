@@ -160,7 +160,9 @@ func loadEngines() -> (EngineManager, TTSEngineManager, String) {
         log.info("Loaded \(config.providers.count) provider(s) from providers.json")
         let asrConfig = (config.providers.contains(where: { $0.resolvedKind == .asr })
             ? config
-            : defaultASRConfig()).merging(asrPlugins)
+            : defaultASRConfig())
+            .merging([ProviderEntry(id: "native-streaming", kind: .asr, builtin: true)])
+            .merging(asrPlugins)
         let baseTTSConfig: ProvidersConfig
         if config.providers.contains(where: { $0.resolvedKind == .tts }) {
             let merged = TTSDefaultProviderConfig.mergingMissingDefaults(into: config)

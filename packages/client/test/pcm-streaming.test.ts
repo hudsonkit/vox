@@ -16,7 +16,7 @@ describe("native PCM streaming", () => {
     await client.appendPCMStream("a", 0, new Float32Array([1, -0.5]));
     expect((await client.finishPCMStream("a")).text).toBe("hello");
     await client.cancelPCMStream("a");
-    expect(calls[0]).toEqual({ method: "transcribe.stream.start", params: { clientId: "talkie", modelId: "nemotron:streaming-560ms" } });
+    expect(calls[0]).toEqual({ method: "transcribe.stream.start", params: { clientId: "talkie", modelId: "nemotron:unified-560ms" } });
     expect(calls[1]).toEqual({ method: "transcribe.stream.append", params: { clientId: "talkie", sessionId: "a", sequence: 0, audioBase64: "AACAPwAAAL8=" } });
     expect(calls[3]).toEqual({ method: "transcribe.stream.cancel", params: { clientId: "talkie", sessionId: "a" } });
   });

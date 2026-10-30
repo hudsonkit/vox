@@ -73,7 +73,7 @@ export class VoxClient {
   }
 
   /** Capture belongs to the app. Explicitly preload a live model before starting. */
-  async startPCMStream(modelId = "nemotron:streaming-560ms"): Promise<PCMStreamingSession> {
+  async startPCMStream(modelId = "nemotron:unified-560ms"): Promise<PCMStreamingSession> {
     return await this.call("transcribe.stream.start", { modelId }) as unknown as PCMStreamingSession;
   }
 

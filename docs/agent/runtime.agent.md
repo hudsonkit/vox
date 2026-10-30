@@ -39,3 +39,5 @@
 - Private Unix transport is intentional cross-process mode for Talkie and other app processes.
 
 - Standalone voxd: set VOX_SOCKET_PATH + VOX_AUTH_TOKEN for the same private transport; no TCP listener in that mode.
+
+- Current StreamingASRDefaults.modelId: nemotron:unified-560ms; new Native provider is included when loading legacy custom ASR provider configurations unless the same provider id is explicitly configured.

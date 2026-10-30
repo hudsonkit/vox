@@ -34,3 +34,6 @@
 - Models/preload surfaces include planned computePlacement; streaming status exposes residency and owner.
 - CoreML streaming installation is disk-only; preload explicitly loads/primes; idle unload default 60 s.
 - Batch and streaming share one process-wide native model slot; multiple app processes use one authenticated private Unix host.
+
+- Current live default: nemotron:unified-560ms (Nemotron Labs Unified, Oct 28 conversion bd13ddd); 160 ms stride + 400 ms right context, buffered re-encode, not encoder-cache streaming.
+- Nemotron 3.5 Latin cache-aware alternative: nemotron:streaming-560ms, 560 ms chunks.

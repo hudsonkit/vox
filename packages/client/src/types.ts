@@ -49,7 +49,7 @@ export interface DoctorReport {
 }
 
 export interface ModelInfo {
-  computePlacement?: CoreMLPlacement;
+  computePlacement?: CoreMLPlacement | null;
   id: string;
   name: string;
   backend: string;
