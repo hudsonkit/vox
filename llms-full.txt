@@ -1108,6 +1108,74 @@ For several apps, run one `voxd` and connect through its authenticated private U
 
 Every append, finish, and cancel request must include the returned `sessionId` and the same `clientId`, on the same connection. A disconnect cancels that connection's session. One session owns the native model slot; other callers receive a busy error. Sessions expire after 120 seconds. A client must start a new session after reconnecting.
 
+### Swift companion client
+
+For intentional cross-process Apple integrations, select the `VoxClient` Swift
+package product. Its only target dependency is `VoxCore`. It does not link
+`VoxEngine`, `HudsonSpeechEngine`, `VoxService`, or model resources. Both the root
+package and `swift/Package.swift` export this product. It is not present in older
+published versions; use a revision that contains the product.
+
+```swift
+import VoxClient
+
+let client = VoxDaemonClient(clientId: "talkie")
+try await client.connect(.unix(socketPath: socketPath, authToken: authToken))
+_ = try await client.installModel(StreamingASRDefaults.modelId) { progress in
+    // Update app UI from progress.event and progress.data. Return promptly.
+}
+_ = try await client.preloadModel(StreamingASRDefaults.modelId)
+let session = try await client.startPCMStream()
+let ack = try await client.appendPCMStream(
+    sessionId: session.sessionId, sequence: session.nextSequence, samples: samples)
+// Render ack.updates. Use ack.nextSequence for the next packet.
+let final = try await client.finishPCMStream(sessionId: session.sessionId)
+await client.disconnect()
+```
+
+The app supplies `socketPath`, `authToken`, and captured `samples`. Provision the
+credential through the host, not a URL or a log. The Unix client checks private
+filesystem ownership and permissions, rejects symlink paths, checks the server
+peer UID, and validates the WebSocket upgrade before RPC dispatch. It masks
+outgoing frames and bounds incoming messages to 16 MiB and queued output to 32 MiB.
+
+`VoxEndpoint.runtime(runtime, authToken:)` selects a private socket from
+`RuntimeInfo`. It refuses TCP metadata unless `allowTCP: true` is explicit.
+Direct `.tcp(host:port:authToken:)` selection is also an explicit opt-in. This is
+unencrypted WebSocket; use a trusted loopback host. The client never launches a
+daemon, discovers credentials, reconnects, or falls back to another transport.
+
+`listModels()`, `listCatalog()`, `installModel(_:onProgress:)`,
+`preloadModel(_:onProgress:)`, and `transcribeFile(path:modelId:)` return
+`JSONValue`, a Sendable Codable value. This preserves provider metrics and
+catalog fields without a parallel schema. `nativeStreamingStatus()` returns
+`NativeStreamingStatus` from `VoxCore`. PCM methods return typed
+`PCMStreamingSession`, `PCMStreamingAcknowledgement`, and `StreamingASRUpdate`.
+`cancelPCMStream(sessionId:)` discards the session without a transcript.
+
+Use `call(_:params:timeout:onProgress:)` for other existing routes, including
+warmup, annotation and TTS. It always supplies the client's stable `clientId`.
+Progress callbacks receive `VoxRPCProgress` and run on the client actor; dispatch
+UI changes to the main actor. Install has a 30-minute request budget, preload and
+file transcription have 5-minute budgets, and other methods default to 30 seconds.
+At most 64 RPC requests can be pending. PCM append and finish reject overlapping
+operations for the same session; await each acknowledgement.
+
+A cancelled or timed-out request closes the connection and fails all pending
+requests. The daemon cancels connection-owned sessions on disconnect. Execution
+of an already received request is uncertain: cancellation of an install wait is
+not a server-side download-cancel capability. Never retry an uncertain append.
+Reconnect explicitly and start a new session. App error paths must disconnect or
+cancel their owned session; abandoning an awaiting task without cancelling it is
+not cancellation.
+
+This client does not add capability negotiation, VAD events, confirmed-word
+boundaries, dictionary hints, download deletion/cancellation, or language result
+fields. It exposes the existing daemon contract, including its 120-second native
+stream limit. `annotate.file` remains a file-first scaffold, not a guarantee of an
+installed diarization backend. TTS cancellation uses synthesis sessions; raw
+`synthesize.generate` does not have a per-request cancel RPC.
+
 ### PCM wire contract
 
 | Route | Parameters | Result |
@@ -3388,6 +3456,18 @@ Source: docs/agent/runtime.agent.md
 - Standalone voxd: set VOX_SOCKET_PATH + VOX_AUTH_TOKEN for the same private transport; no TCP listener in that mode.
 
 - Current StreamingASRDefaults.modelId: nemotron:unified-560ms; new Native provider is included when loading legacy custom ASR provider configurations unless the same provider id is explicitly configured.
+
+## Swift companion client
+
+- Product/module `VoxClient`, public actor `VoxDaemonClient(clientId:)`; depends only on VoxCore, no engines/resources. Root and nested Swift manifests export it.
+- Explicit `connect(.unix(socketPath:authToken:))`; Unix path/ownership/permission/peer UID checks, authenticated and validated WebSocket upgrade. No launch, discovery, reconnect or fallback.
+- `VoxEndpoint.runtime(_:authToken:allowTCP:tcpHost:)` requires allowTCP=true for TCP metadata; direct `.tcp(host:port:authToken:)` is explicit opt-in, unencrypted trusted-loopback use.
+- Typed `startPCMStream(modelId:)`, `appendPCMStream(sessionId:sequence:samples:)`, `finishPCMStream(sessionId:)`, `cancelPCMStream(sessionId:)`, `nativeStreamingStatus()`; shared DTOs re-exported from VoxCore.
+- Generic Sendable Codable JSONValue from listModels/listCatalog/installModel/preloadModel/transcribeFile; `call(_:params:timeout:onProgress:)` exposes other existing routes, overrides clientId with owned identity.
+- Progress VoxRPCProgress callback must return promptly; UI work goes to MainActor. Install timeout 1800 s; preload/file 300 s; other calls 30 s.
+- One typed append/finish in flight per session; 64 pending RPC limit; 16 MiB messages/32 MiB Unix queued output. Cancel remains callable during append/finish.
+- Request task cancellation/timeout closes connection and fails all pending calls, never retries uncertain work; not a server download-cancel capability. Explicit reconnect starts a new session.
+- No new capability negotiation, VAD, confirmed boundaries, hints, model delete/download cancellation, language field, or streaming diarization. File annotation requires a backend; one-shot generate has disconnect cancellation, not a per-request cancel RPC.
 
 # SDK Facts
 

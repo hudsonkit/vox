@@ -15,6 +15,7 @@ let package = Package(
     ],
     products: [
         .library(name: "VoxCore", targets: ["VoxCore"]),
+        .library(name: "VoxClient", targets: ["VoxClient"]),
         .library(name: "VoxEngine", targets: ["VoxEngine"]),
         .library(name: "HudsonSpeechEngine", targets: ["HudsonSpeechEngine"]),
         .library(name: "VoxAppleSpeech", targets: ["VoxAppleSpeech"]),
@@ -27,6 +28,7 @@ let package = Package(
     ],
     targets: [
         .target(name: "VoxCore"),
+        .target(name: "VoxClient", dependencies: ["VoxCore"]),
         .target(
             name: "HudsonSpeechEngine",
             dependencies: ["VoxCore"],
@@ -74,6 +76,7 @@ let package = Package(
             ]
         ),
         .executableTarget(name: "VoxASRBench", dependencies: ["VoxCore", "HudsonSpeechEngine"]),
+        .testTarget(name: "VoxClientTests", dependencies: ["VoxClient", "VoxService"]),
         .testTarget(
             name: "VoxCoreTests",
             dependencies: ["VoxCore"]

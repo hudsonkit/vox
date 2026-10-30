@@ -1,15 +1,6 @@
 import Foundation
 import VoxCore
 
-public struct NativeStreamingStatus: Codable, Sendable, Equatable {
-  public let modelId: String?
-  public let loadingModelId: String?
-  public let placement: CoreMLPlacement?
-  public let activeSessionId: UUID?
-  public let clientId: String?
-  public let idleUnloadSeconds: Double
-}
-
 /// Process-wide native streaming ASR. One loaded pipeline, one session owner, bounded PCM input.
 /// Apps with several processes should share this instance through voxd's authenticated Unix transport.
 public actor NativeStreamingASR: ASRProvider {

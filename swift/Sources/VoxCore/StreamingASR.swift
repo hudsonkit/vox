@@ -49,3 +49,22 @@ public enum StreamingASRDefaults {
   public static let modelId = "nemotron:unified-560ms"
   public static let idleUnloadSeconds: Double = 60
 }
+
+public struct NativeStreamingStatus: Codable, Sendable, Equatable {
+  public let modelId: String?
+  public let loadingModelId: String?
+  public let placement: CoreMLPlacement?
+  public let activeSessionId: UUID?
+  public let clientId: String?
+  public let idleUnloadSeconds: Double
+  public init(modelId: String? = nil, loadingModelId: String? = nil,
+              placement: CoreMLPlacement? = nil, activeSessionId: UUID? = nil,
+              clientId: String? = nil, idleUnloadSeconds: Double) {
+    self.modelId = modelId
+    self.loadingModelId = loadingModelId
+    self.placement = placement
+    self.activeSessionId = activeSessionId
+    self.clientId = clientId
+    self.idleUnloadSeconds = idleUnloadSeconds
+  }
+}

@@ -18,6 +18,8 @@ jobs:
         with:
           bun-version: 1.4.4
       - run: xcrun swift --version
+      - name: Root package exports the lightweight Swift client
+        run: xcrun swift build --target VoxClient --jobs 3
       - run: xcrun swift test --package-path swift --jobs 3
       - name: Provider readers do not starve a strict cooperative executor
         env:

@@ -17,6 +17,7 @@ let package = Package(
     ],
     products: [
         .library(name: "VoxCore", targets: ["VoxCore"]),
+        .library(name: "VoxClient", targets: ["VoxClient"]),
         .library(name: "VoxEngine", targets: ["VoxEngine"]),
         .library(name: "HudsonSpeechEngine", targets: ["HudsonSpeechEngine"]),
         .library(name: "VoxAppleSpeech", targets: ["VoxAppleSpeech"]),
@@ -30,6 +31,11 @@ let package = Package(
         .target(
             name: "VoxCore",
             path: "swift/Sources/VoxCore"
+        ),
+        .target(
+            name: "VoxClient",
+            dependencies: ["VoxCore"],
+            path: "swift/Sources/VoxClient"
         ),
         .target(
             name: "HudsonSpeechEngine",
@@ -83,6 +89,11 @@ let package = Package(
                     "-Xlinker", voxdInfoPlistPath
                 ], .when(platforms: [.macOS]))
             ]
+        ),
+        .testTarget(
+            name: "VoxClientTests",
+            dependencies: ["VoxClient", "VoxService"],
+            path: "swift/Tests/VoxClientTests"
         ),
         .testTarget(
             name: "VoxCoreTests",
