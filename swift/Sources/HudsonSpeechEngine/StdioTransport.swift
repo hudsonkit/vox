@@ -15,7 +15,6 @@ public final class StdioTransport: @unchecked Sendable {
     private var nextId: Int = 1
     private var pending: [Int: CheckedContinuation<[String: Any], any Error>] = [:]
     private var _progressHandler: (([String: Any]) -> Void)?
-    private var readTask: Task<Void, Never>?
     private var _isRunning: Bool = false
     private var _stderrOutput: String = ""
     private let callTimeoutSeconds: TimeInterval
@@ -76,8 +75,6 @@ public final class StdioTransport: @unchecked Sendable {
     }
 
     public func stop() {
-        readTask?.cancel()
-        readTask = nil
         queue.sync {
             if let process, process.isRunning {
                 try? stdinPipe?.fileHandleForWriting.close()
@@ -185,9 +182,11 @@ public final class StdioTransport: @unchecked Sendable {
 
     private func startReadingStdout(_ pipe: Pipe) {
         let handle = pipe.fileHandleForReading
-        readTask = Task.detached { [weak self] in
+        // FileHandle.availableData blocks. It must not occupy Swift's bounded
+        // cooperative executor, which also runs callers and their timeout continuations.
+        DispatchQueue.global(qos: .utility).async { [weak self] in
             var buffer = Data()
-            while !Task.isCancelled {
+            while self?.processIsRunning == true {
                 let chunk = handle.availableData
                 if chunk.isEmpty { break }
                 buffer.append(chunk)
@@ -209,8 +208,8 @@ public final class StdioTransport: @unchecked Sendable {
 
     private func startReadingStderr(_ pipe: Pipe) {
         let handle = pipe.fileHandleForReading
-        Task.detached { [weak self] in
-            while !Task.isCancelled {
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            while self?.processIsRunning == true {
                 let chunk = handle.availableData
                 if chunk.isEmpty { break }
                 if let text = String(data: chunk, encoding: .utf8) {
