@@ -5,6 +5,7 @@ struct ParakeetModelManifest: Sendable, Equatable {
     let modelId: String
     let name: String
     let backend: String
+    let revision: String
     let repositoryFolderName: String
     let cacheDirectoryName: String
     let requiredModelFiles: Set<String>
@@ -21,6 +22,7 @@ struct ParakeetModelManifest: Sendable, Equatable {
         name: String,
         backend: String = "parakeet",
         repositoryFolderName: String,
+        revision: String = "main",
         cacheDirectoryName: String,
         requiredModelFiles: Set<String>,
         vocabularyFile: String,
@@ -31,6 +33,7 @@ struct ParakeetModelManifest: Sendable, Equatable {
         self.name = name
         self.backend = backend
         self.repositoryFolderName = repositoryFolderName
+        self.revision = revision
         self.cacheDirectoryName = cacheDirectoryName
         self.requiredModelFiles = requiredModelFiles
         self.vocabularyFile = vocabularyFile
@@ -50,6 +53,7 @@ struct ParakeetModelManifest: Sendable, Equatable {
             modelId: entry.id,
             name: entry.name,
             repositoryFolderName: repo,
+            revision: entry.source?.revision ?? "main",
             cacheDirectoryName: spec.cacheDirectoryName,
             requiredModelFiles: Set(spec.requiredFiles),
             vocabularyFile: spec.vocabularyFile,
@@ -62,7 +66,8 @@ struct ParakeetModelManifest: Sendable, Equatable {
         modelId: "parakeet:v3",
         name: "Parakeet TDT v3",
         repositoryFolderName: "FluidInference/parakeet-tdt-0.6b-v3-coreml",
-        cacheDirectoryName: "parakeet-tdt-0.6b-v3",
+        revision: "7dd20fe6b1797d35f5e3307e8b1732d9a178edfe",
+        cacheDirectoryName: "parakeet-tdt-0.6b-v3-7dd20fe",
         requiredModelFiles: [
             "Preprocessor.mlmodelc",
             "Encoder.mlmodelc",
@@ -191,8 +196,13 @@ struct ParakeetModelStore: Sendable {
             return false
         }
 
+        // Check compiled-bundle contents, not just a directory left by an interrupted download.
+        // Never instantiate an MLModel (especially a CPU encoder) for installation validation.
         let requiredModelsPresent = manifest.requiredModelFiles.allSatisfy { fileName in
-            fileManager.fileExists(atPath: directory.appendingPathComponent(fileName).path)
+            ["coremldata.bin", "model.mil", "weights/weight.bin"].allSatisfy { artifact in
+                let path = directory.appendingPathComponent(fileName).appendingPathComponent(artifact).path
+                return ((try? fileManager.attributesOfItem(atPath: path)[.size] as? NSNumber)?.intValue ?? 0) > 0
+            }
         }
         guard requiredModelsPresent else {
             return false
@@ -246,7 +256,8 @@ struct VoxParakeetArtifactDownloader: ParakeetModelArtifactDownloader {
         func listDirectory(path: String) async throws {
             let items = try await VoxModelHub.listDirectory(
                 repoPath: manifest.repositoryFolderName,
-                path: path
+                path: path,
+                revision: manifest.revision
             )
             for item in items {
                 guard let itemPath = item["path"] as? String,
@@ -274,7 +285,8 @@ struct VoxParakeetArtifactDownloader: ParakeetModelArtifactDownloader {
             try await VoxModelHub.downloadFile(
                 repoPath: manifest.repositoryFolderName,
                 remotePath: file.path,
-                to: destinationURL
+                to: destinationURL,
+                revision: manifest.revision
             )
 
             let fraction = filesToDownload.isEmpty ? 1.0 : Double(index + 1) / Double(filesToDownload.count)

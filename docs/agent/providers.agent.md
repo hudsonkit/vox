@@ -22,7 +22,7 @@
 - provider state may cache weights, but crash/restart must remain safe
 - canonical implementations: `swift/Sources/HudsonSpeechEngine/` built-in providers plus `ExternalProvider.swift` and `ExternalTTSProvider.swift`
 - published catalog: `https://voxd.cc/data/models.json` from repo `data/models.json`
-- catalog families the engine can run: `parakeet-tdt`, `apple-speech`, `mlx-audio`, `openai-transcribe`
+- catalog families the engine can run: `coreml-streaming`, `parakeet-tdt`, `apple-speech`, `mlx-audio`, `openai-transcribe`
 - catalog plugins: `plugins[]` plus model `plugin` id; install writes `~/.vox/plugins/<id>/provider.json`
 - Gemma 4 E2B: plugin `mlx-vlm`; `vox plugins install mlx-vlm`
 - Whistle: optional `whistle` plugin/model, prebuilt Needle runtime in a separate Rust process; file ASR <=30 seconds, word timings, no live partials
@@ -43,7 +43,7 @@
 - native alternative: `apple:speech-transcriber`
 - MLX shortlist: Qwen3-ASR 1.7B, Cohere Transcribe 03-2026, Nemotron 3.5 ASR Streaming 0.6B
 - supported architecture: Apple Silicon (`arm64`) only; no Intel support
-- current provider `transcribe` is file-based; do not claim model-backed partials from upstream streaming capability
+- ASRProvider.transcribe / external provider transcribe remain file-based. NativeStreamingASR.shared and transcribe.stream.* are a separate native PCM surface with model-backed partials.
 - model adapters use platform/provider audio conversion; never add hand-written resampling or denoising
 - remote OpenAI ASR: `gpt-transcribe`, `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, `whisper-1`
 - override catalog URL with `VOX_MODEL_CATALOG_URL`

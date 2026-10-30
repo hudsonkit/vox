@@ -16,3 +16,6 @@
 - live session method exposed: `createLiveSession`; it returns `VoxLiveSession` synchronously
 - synthesis can return optional `speechTiming`; read the types in `packages/client/src/types.ts` before duplicating shapes
 - per-request `credentials` are allowlisted for OpenAI, NVIDIA Magpie, Groq, and Gemini/Google only
+
+- Native PCM: preloadModel explicitly, startPCMStream(modelId), appendPCMStream(sessionId,sequence,Float32Array) -> nextSequence+updates, finishPCMStream -> final update, cancelPCMStream -> discard, nativeStreamingStatus.
+- 1–16000 finite mono 16 kHz samples; await each packet acknowledgement; no uncertain retries; cumulative text + approximate word timestamps + endpointSource.

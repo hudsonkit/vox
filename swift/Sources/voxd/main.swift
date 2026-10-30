@@ -25,6 +25,7 @@ func defaultASRConfig() -> ProvidersConfig {
     let appleSpeechModels = catalog.appleSpeechModelIDs()
     let openaiModels = catalog.openaiTranscribeModelIDs()
     return ProvidersConfig(providers: [
+        ProviderEntry(id: "native-streaming", kind: .asr, builtin: true),
         ProviderEntry(
             id: "parakeet",
             kind: .asr,
@@ -192,6 +193,7 @@ func loadEngines() -> (EngineManager, TTSEngineManager, String) {
 let port = parsePort()
 let host = VoxDefaults.resolvedHost()
 let authToken = ProcessInfo.processInfo.environment["VOX_AUTH_TOKEN"].flatMap { $0.isEmpty ? nil : $0 }
+let socketPath = ProcessInfo.processInfo.environment["VOX_SOCKET_PATH"].flatMap { $0.isEmpty ? nil : $0 }
 let (engine, ttsEngine, defaultSynthesisModelId) = loadEngines()
 let service = VoxRuntimeService(
     port: port,
@@ -199,7 +201,8 @@ let service = VoxRuntimeService(
     engine: engine,
     ttsEngine: ttsEngine,
     defaultSynthesisModelId: defaultSynthesisModelId,
-    authToken: authToken
+    authToken: authToken,
+    socketPath: socketPath
 )
 
 do {

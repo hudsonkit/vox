@@ -19,3 +19,23 @@
 - Private transport checks peer UID, uses directory `0700` and socket `0600`, and rejects symlink paths.
 - Private registry metadata includes `socketPath` and `port: 0`; host capability discovery owns this mode. Standalone CLI/browser TCP behavior is unchanged.
 - Frame bounds: 16 MiB inbound, 32 MiB queued outbound; connection ID and client ID still own sessions.
+
+## Native app-captured PCM
+
+- Default streaming model: `StreamingASRDefaults.modelId`; batch default stays `parakeet:v3`.
+- Install and preload explicitly with `models.install` / `models.preload`; start never downloads or warms.
+- Routes: `transcribe.stream.start|append|finish|cancel|status`; separate from the old daemon-microphone sessions.
+- Start: clientId + modelId -> sessionId, 16 kHz mono float32le, nextSequence=0, maxPacketSamples=16000.
+- Append: clientId + sessionId + sequence + audioBase64; await ack nextSequence + updates[] before next packet.
+- Updates: cumulative text, words (seconds), processedAudioMs, chunkLatencyMs, endOfUtterance, optional endpointSource.
+- Word timings are greedy RNNT emission frames, not forced alignment.
+- Endpoint source: `model` for Parakeet EOU; `blank-duration` for Nemotron (1120 ms); endpoint does not auto-stop.
+- Finish flushes -> result; cancel discards -> cancelled, no final transcript.
+- Connection AND clientId AND sessionId own mutation; disconnect cancels; 120 s session limit.
+- One acknowledged packet in flight; no uncertain append retries; reconnect means new session.
+- Shared native model slot spans batch and streaming; exclusive active lease; unload previous before switching.
+- MLComputePlan verifies ANE compute placement after load, retries once, fails closed; planned placement, not execution trace.
+- Idle unload default 60 s; VOX_ASR_IDLE_SECONDS=0 disables; preload after eviction.
+- Private Unix transport is intentional cross-process mode for Talkie and other app processes.
+
+- Standalone voxd: set VOX_SOCKET_PATH + VOX_AUTH_TOKEN for the same private transport; no TCP listener in that mode.

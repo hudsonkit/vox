@@ -1,5 +1,6 @@
 @preconcurrency import CoreML
 import Foundation
+import VoxCore
 
 struct ParakeetModelURLs: Sendable {
     let preprocessor: URL
@@ -16,6 +17,7 @@ struct ParakeetLoadedModels: Sendable {
     let joint: MLModel
     let configuration: MLModelConfiguration
     let vocabulary: [Int: String]
+    let placement: CoreMLPlacement
 }
 
 struct ParakeetModelLoader: Sendable {
@@ -35,16 +37,13 @@ struct ParakeetModelLoader: Sendable {
         )
     }
 
-    func loadModels(from directory: URL) throws -> ParakeetLoadedModels {
+    func loadModels(from directory: URL) async throws -> ParakeetLoadedModels {
         let urls = modelURLs(in: directory)
         let preprocessor = try MLModel(
             contentsOf: urls.preprocessor,
             configuration: modelConfiguration(computeUnits: .cpuOnly)
         )
-        let encoder = try MLModel(
-            contentsOf: urls.encoder,
-            configuration: modelConfiguration(computeUnits: .cpuAndNeuralEngine)
-        )
+        let (encoder, placement) = try await CoreMLPlacement.loadEncoder(url: urls.encoder, modelId: manifest.modelId)
         let decoder = try MLModel(
             contentsOf: urls.decoder,
             configuration: modelConfiguration(computeUnits: .cpuAndNeuralEngine)
@@ -62,7 +61,8 @@ struct ParakeetModelLoader: Sendable {
             decoder: decoder,
             joint: joint,
             configuration: configuration,
-            vocabulary: vocabulary
+            vocabulary: vocabulary,
+            placement: placement
         )
     }
 

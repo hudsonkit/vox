@@ -12,6 +12,9 @@ public actor ProviderRegistry: ASRProvider {
 
             if entry.isBuiltin {
                 switch entry.id.lowercased() {
+                case "native-streaming", "coreml-streaming":
+                    provider = NativeStreamingASR.shared
+                    log.info("Registered builtin native Core ML streaming provider: \(entry.id)")
                 case "parakeet", "parakeet-asr":
                     provider = ParakeetProvider()
                     log.info("Registered builtin provider: \(entry.id)")

@@ -9,11 +9,17 @@ public final class ParakeetProvider: @unchecked Sendable, ASRProvider {
     private var engines: [String: Engine] = [:]
     private let engineLock = NSLock()
 
-    private struct Engine {
+    private struct Engine: Sendable {
         let manifest: ParakeetModelManifest
         let store: ParakeetModelStore
         let runtime: any ParakeetRuntime
     }
+
+    private final class SharedEngines: @unchecked Sendable {
+        let lock = NSLock()
+        var engines: [String: Engine] = [:]
+    }
+    private static let sharedEngines = SharedEngines()
 
     public init(catalogStore: ModelCatalogStore = .shared) {
         self.catalogStore = catalogStore
@@ -166,11 +172,15 @@ public final class ParakeetProvider: @unchecked Sendable, ASRProvider {
         if let existing = engines[manifest.modelId] {
             return existing
         }
+        Self.sharedEngines.lock.lock()
+        defer { Self.sharedEngines.lock.unlock() }
+        if let shared = Self.sharedEngines.engines[manifest.modelId] { return shared }
         let created = Engine(
             manifest: manifest,
             store: ParakeetModelStore(manifest: manifest),
             runtime: ParakeetCoreMLRuntime(manifest: manifest)
         )
+        Self.sharedEngines.engines[manifest.modelId] = created
         engines[manifest.modelId] = created
         return created
     }
@@ -193,7 +203,8 @@ public final class ParakeetProvider: @unchecked Sendable, ASRProvider {
             backend: engine.manifest.backend,
             installed: engine.store.isInstalled(),
             preloaded: await engine.runtime.isPreloaded(),
-            available: engine.runtime.isAvailable
+            available: engine.runtime.isAvailable,
+            computePlacement: await engine.runtime.computePlacement()
         )
     }
 }

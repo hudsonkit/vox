@@ -162,3 +162,48 @@ vox logs daemon --tail 80
 ```
 
 See [Architecture](./architecture.md) for layer ownership and [Observability](./observability.md) for performance sample interpretation.
+
+## Native PCM streaming
+
+Use the app-captured PCM routes for model-backed partial text. These routes are separate from the existing daemon-microphone `transcribe.startSession` routes. The app owns microphone permission, capture, and conversion to mono 16 kHz float32 PCM. Vox owns inference, decoder state, word timings, and endpoint detection.
+
+For several apps, run one `voxd` and connect through its authenticated private Unix transport. Set `VOX_SOCKET_PATH` and `VOX_AUTH_TOKEN` in the host environment; private mode requires both and opens no TCP listener. Do not launch one daemon per app. For a single-process app, use `NativeStreamingASR.shared` from `VoxEngine` instead. Both surfaces use the same Swift/Core ML implementation. Neither uses Python, MLX, or the FluidAudio package.
+
+1. Call `models.install` with the live `modelId`. Installation does not load the streaming model.
+2. Call `models.preload` explicitly. Preload loads the encoder, verifies its compute plan, and primes prediction. Allow for a cold ANE compile.
+3. Call `transcribe.stream.start` with `clientId` and `modelId`. Start requires a preloaded model and does not download or warm it.
+4. Send `transcribe.stream.append` packets. Await each acknowledgement before sending the next packet.
+5. Call `transcribe.stream.finish` to flush pending audio and obtain the final transcript. Call `transcribe.stream.cancel` to discard it instead.
+
+Every append, finish, and cancel request must include the returned `sessionId` and the same `clientId`, on the same connection. A disconnect cancels that connection's session. One session owns the native model slot; other callers receive a busy error. Sessions expire after 120 seconds. A client must start a new session after reconnecting.
+
+### PCM wire contract
+
+| Route | Parameters | Result |
+|---|---|---|
+| `transcribe.stream.start` | `clientId`, optional `modelId` | `sessionId`, `modelId`, `sampleRate: 16000`, `channels: 1`, `encoding: "float32le"`, `maxPacketSamples: 16000`, `nextSequence: 0` |
+| `transcribe.stream.append` | `clientId`, `sessionId`, `sequence`, `audioBase64` | `sessionId`, `nextSequence`, `updates[]` |
+| `transcribe.stream.finish` | `clientId`, `sessionId` | `sessionId`, `result` |
+| `transcribe.stream.cancel` | `clientId`, `sessionId` | `sessionId`, `cancelled: true`; no final transcript |
+| `transcribe.stream.status` | none | loaded/loading `modelId`, encoder `placement`, active session/client, `idleUnloadSeconds` |
+
+`audioBase64` encodes little-endian IEEE float32 samples. Each packet contains 1–16000 finite samples. Use 80 ms packets (1280 samples) for responsive feedback. Sequence numbers start at zero and increase once per acknowledged packet. Duplicate and out-of-order packets are rejected. Do not retry an append whose receipt is uncertain; cancel or reconnect and begin a new session. There is no unbounded server-side PCM queue.
+
+Each update and final result contains:
+
+- `text`: cumulative transcript, not a text delta;
+- `words`: `word`, `start`, `end` in seconds, and `confidence`;
+- `processedAudioMs`: the processed position on the input-audio timeline;
+- `chunkLatencyMs`: inference time for that chunk;
+- `endOfUtterance`: an endpoint notification, not an implicit stop;
+- optional `endpointSource`: `model` for the Parakeet EOU token, or `blank-duration` for Nemotron's 1120 ms RNNT blank-duration rule.
+
+Word timestamps are approximate greedy RNNT emission frames, not forced alignment. The caller decides whether an endpoint should finish the session. Finish is explicit, including when the last update signals an endpoint. Finish results do not synthesize a model endpoint.
+
+### Placement and residency
+
+After load, Vox reads `MLComputePlan` with `.cpuAndNeuralEngine`. Diagnostics expose preferred ANE, CPU, GPU, and unassigned operation counts, plus ANE/CPU counts for convolution, linear, and matrix-multiplication operations. A few CPU shape and integer operations are expected. The encoder must have compute operations on ANE. If any compute operations use CPU, at least 95% of the scheduled ANE/CPU estimated cost must be on ANE. This allows the two small CPU pre-encode convolutions in Nemotron on M1 without accepting a CPU encoder. A failed placement check releases the instance, retries once, then fails instead of accepting CPU fallback. This verifies the planned device assignment; it is not a hardware execution trace.
+
+The native ASR slot is process-wide and shared by batch Parakeet and streaming providers. Model switching unloads the previous model before loading another. An active session or batch inference holds an exclusive lease. Warmup is serialized; same-model streaming warmups join one flight. Installation validation checks files and byte counts without loading or compiling models.
+
+Idle models unload after 60 seconds. Set `VOX_ASR_IDLE_SECONDS` before starting the host to change this timeout; `0` disables eviction. Embedded streaming callers can also call `setIdleUnload(seconds:)`. Active sessions are not evicted. Preload again after an idle unload. `transcribe.stream.status` and `models.list` expose current residency and planned placement. Streaming telemetry preserves `clientId`, `route: "transcribe.streaming"`, and `modelId`.

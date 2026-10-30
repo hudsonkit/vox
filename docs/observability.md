@@ -52,6 +52,7 @@ Current emitted performance routes:
 
 - `transcribe.file`
 - `transcribe.live`
+- `transcribe.streaming`
 - `synthesize.generate`
 - `synthesize.startSession`
 
@@ -105,3 +106,11 @@ vox perf dashboard --client vox-cli
 - Large `modelLoadMs` spikes are warm-up events, not inference regressions.
 
 See [Runtime](./runtime.md) for emitted routes and [API](./api.md) for the current performance sample shape.
+
+## Native ASR measurements
+
+Build `vox-asr-bench` with `swift build --package-path swift -c release --product vox-asr-bench`. It accepts a model id, an explicit streaming model bundle directory, and a mono 16 kHz WAV. A directory of WAV files with matching `.txt` references produces a multi-utterance report. Batch `parakeet:v3` uses its installed `VOX_HOME` cache rather than the directory argument.
+
+The JSON report separates preload and priming from dictation. It reports process `phys_footprint` in decimal MB, per-chunk latency, input-audio time at the first partial, unpaced compute time to that partial, and the encoder's compute-plan placement. Add `--paced` to feed capture packets in real time and measure wall-clock first-partial latency. Unpaced compute time is not user-perceived latency. WER scoring lowercases text and removes punctuation; it does not normalize abbreviations or number spellings.
+
+These measurements exclude other processes and system-wide accelerator memory. Compare candidates on the same audio, host, and build configuration. A small smoke corpus is not a production accuracy evaluation.

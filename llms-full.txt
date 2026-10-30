@@ -552,6 +552,8 @@ vox perf dashboard --client vox-cli
 
 Continue with the [Quickstart](./quickstart.md), [Models and plugins](./models.md), [Swift Embed Guide](./apple-embed.md), or [Web Integration Guide](./web-integration.md) for the surface you chose.
 
+Native app-captured streaming uses `NativeStreamingASR.shared` in process or `transcribe.stream.*` through a shared authenticated host. Batch file transcription remains on Parakeet v3. See [Runtime](./runtime.md#native-pcm-streaming).
+
 # Command line
 
 Source: /docs/quickstart
@@ -803,7 +805,7 @@ Do not hide warm-up behind app launch side effects. Warm on intent at a predicta
 
 ## Telemetry
 
-Companion mode records telemetry automatically. In embed mode, `VoxDictation` records a sample for every transcription (pass `recordsPerformance: false` to opt out). The lower-level types do not.
+Companion mode records telemetry automatically. In embed mode, `VoxDictation` records a sample for every transcription (pass `recordsPerformance: false` to opt out). `NativeStreamingASR.finish` also records its session, preserving clientId, route, and modelId; pass `recordPerformance: false` when the caller records it. The lower-level file engines do not.
 
 When you call `EngineManager` or `TTSEngineManager` directly, record samples yourself with `PerformanceRecorder` and preserve these dimensions:
 
@@ -825,7 +827,7 @@ Use the same route names Vox Companion uses:
 
 ## OpenAI TTS in embed mode
 
-- ASR: `EngineManager()` -> `ParakeetProvider()`
+- ASR: `EngineManager()` -> `NativeASRProvider()` (batch Parakeet plus explicit streaming models)
 - TTS: `TTSEngineManager()` registers every built-in provider: OpenAI, ElevenLabs, MiniMax, NVIDIA, Groq, Gemini and AVSpeech. It routes by model id and never falls back from one provider to another.
 - default TTS model: `TTSDefaults.modelId` = `gpt-4o-mini-tts`, which needs an OpenAI key
 - local TTS model: `TTSDefaults.localModelId` = `avspeech:system`, on device, no key
@@ -871,7 +873,7 @@ For a new Apple app integration, the default plan is:
 
 - `VoxDictation` covers dictation only. `VoxAppleSpeech` is optional playback, separate from it.
 - `VoxDictation.start()` is macOS only; on iOS it throws.
-- There is no public embed live-session coordinator yet: no partial text while recording.
+- `VoxDictation` still records then transcribes. Use `NativeStreamingASR.shared` with app-captured PCM for model-backed partials.
 - There is no public embed warm-up coordinator helper.
 - `EngineManager` and `TTSEngineManager` do not write performance samples; only `VoxDictation` does.
 - Apple apps do not need `@voxd/sdk` or `@voxd/client`.
@@ -896,6 +898,37 @@ Xcode copies SwiftPM resource bundles into the app for you. If you package the a
 `SpeechEngineResources` resolves the model catalog and mlx-audio provider script
 from that location in apps, and from SwiftPM resources in command-line builds.
 A packaged app does not fall back to a developer build directory.
+
+## App-captured streaming ASR
+
+Use `NativeStreamingASR.shared` when the app needs partial transcripts before capture stops. This API requires Apple Silicon and macOS 14.4 or iOS 17.4, so Core ML placement can be verified. The app supplies finite mono 16 kHz float32 PCM; use platform audio conversion, not a custom resampler.
+
+```swift
+import VoxCore
+import VoxEngine
+
+let asr = NativeStreamingASR.shared
+let modelId = StreamingASRDefaults.modelId
+// Explicit user-initiated warmup, not an app-launch side effect.
+_ = try await asr.preload(modelId: modelId, progress: { progress in
+    print(progress.status)
+})
+let sessionId = try await asr.begin(clientId: "my-app", modelId: modelId)
+// Feed 1–16000 samples per call; await each call before sending the next packet.
+let updates = try await asr.append(
+    sessionId: sessionId, clientId: "my-app", samples: capturedSamples
+)
+for update in updates { print(update.text, update.endOfUtterance) }
+let final = try await asr.finish(sessionId: sessionId, clientId: "my-app")
+print(final.text, final.words)
+// On interruption/error, call cancel instead of finish. It discards pending audio and text.
+```
+
+`preload(modelId:directory:language:progress:)` can use an explicitly supplied offline model bundle. Without a directory, preload installs missing assets. Installation alone is available through `install(modelId:progress:)` and does not instantiate models. Warmups for the same model join one flight. Start requires a ready model and never performs warmup.
+
+The runtime has one active owner and one loaded native ASR model per process. Batch Parakeet and streaming share that residency slot. Idle unload defaults to 60 seconds; call `setIdleUnload(seconds:)` to configure it. Call `status()` to inspect the loaded model, planned encoder device assignment, and owner. Word timings are approximate RNNT emission frames. See [Native PCM streaming](./runtime.md#native-pcm-streaming) for endpoint semantics and lifecycle limits.
+
+For several app processes, deliberately use one `VoxRuntimeService` host or `voxd` over the authenticated private Unix transport. Each app sends PCM using the `transcribe.stream.*` routes. Do not embed a separate model in every app when the product intends shared residency.
 
 # Runtime
 
@@ -1061,6 +1094,51 @@ vox logs daemon --tail 80
 
 See [Architecture](./architecture.md) for layer ownership and [Observability](./observability.md) for performance sample interpretation.
 
+## Native PCM streaming
+
+Use the app-captured PCM routes for model-backed partial text. These routes are separate from the existing daemon-microphone `transcribe.startSession` routes. The app owns microphone permission, capture, and conversion to mono 16 kHz float32 PCM. Vox owns inference, decoder state, word timings, and endpoint detection.
+
+For several apps, run one `voxd` and connect through its authenticated private Unix transport. Set `VOX_SOCKET_PATH` and `VOX_AUTH_TOKEN` in the host environment; private mode requires both and opens no TCP listener. Do not launch one daemon per app. For a single-process app, use `NativeStreamingASR.shared` from `VoxEngine` instead. Both surfaces use the same Swift/Core ML implementation. Neither uses Python, MLX, or the FluidAudio package.
+
+1. Call `models.install` with the live `modelId`. Installation does not load the streaming model.
+2. Call `models.preload` explicitly. Preload loads the encoder, verifies its compute plan, and primes prediction. Allow for a cold ANE compile.
+3. Call `transcribe.stream.start` with `clientId` and `modelId`. Start requires a preloaded model and does not download or warm it.
+4. Send `transcribe.stream.append` packets. Await each acknowledgement before sending the next packet.
+5. Call `transcribe.stream.finish` to flush pending audio and obtain the final transcript. Call `transcribe.stream.cancel` to discard it instead.
+
+Every append, finish, and cancel request must include the returned `sessionId` and the same `clientId`, on the same connection. A disconnect cancels that connection's session. One session owns the native model slot; other callers receive a busy error. Sessions expire after 120 seconds. A client must start a new session after reconnecting.
+
+### PCM wire contract
+
+| Route | Parameters | Result |
+|---|---|---|
+| `transcribe.stream.start` | `clientId`, optional `modelId` | `sessionId`, `modelId`, `sampleRate: 16000`, `channels: 1`, `encoding: "float32le"`, `maxPacketSamples: 16000`, `nextSequence: 0` |
+| `transcribe.stream.append` | `clientId`, `sessionId`, `sequence`, `audioBase64` | `sessionId`, `nextSequence`, `updates[]` |
+| `transcribe.stream.finish` | `clientId`, `sessionId` | `sessionId`, `result` |
+| `transcribe.stream.cancel` | `clientId`, `sessionId` | `sessionId`, `cancelled: true`; no final transcript |
+| `transcribe.stream.status` | none | loaded/loading `modelId`, encoder `placement`, active session/client, `idleUnloadSeconds` |
+
+`audioBase64` encodes little-endian IEEE float32 samples. Each packet contains 1–16000 finite samples. Use 80 ms packets (1280 samples) for responsive feedback. Sequence numbers start at zero and increase once per acknowledged packet. Duplicate and out-of-order packets are rejected. Do not retry an append whose receipt is uncertain; cancel or reconnect and begin a new session. There is no unbounded server-side PCM queue.
+
+Each update and final result contains:
+
+- `text`: cumulative transcript, not a text delta;
+- `words`: `word`, `start`, `end` in seconds, and `confidence`;
+- `processedAudioMs`: the processed position on the input-audio timeline;
+- `chunkLatencyMs`: inference time for that chunk;
+- `endOfUtterance`: an endpoint notification, not an implicit stop;
+- optional `endpointSource`: `model` for the Parakeet EOU token, or `blank-duration` for Nemotron's 1120 ms RNNT blank-duration rule.
+
+Word timestamps are approximate greedy RNNT emission frames, not forced alignment. The caller decides whether an endpoint should finish the session. Finish is explicit, including when the last update signals an endpoint. Finish results do not synthesize a model endpoint.
+
+### Placement and residency
+
+After load, Vox reads `MLComputePlan` with `.cpuAndNeuralEngine`. Diagnostics expose preferred ANE, CPU, GPU, and unassigned operation counts, plus ANE/CPU counts for convolution, linear, and matrix-multiplication operations. A few CPU shape and integer operations are expected. The encoder must have compute operations on ANE. If any compute operations use CPU, at least 95% of the scheduled ANE/CPU estimated cost must be on ANE. This allows the two small CPU pre-encode convolutions in Nemotron on M1 without accepting a CPU encoder. A failed placement check releases the instance, retries once, then fails instead of accepting CPU fallback. This verifies the planned device assignment; it is not a hardware execution trace.
+
+The native ASR slot is process-wide and shared by batch Parakeet and streaming providers. Model switching unloads the previous model before loading another. An active session or batch inference holds an exclusive lease. Warmup is serialized; same-model streaming warmups join one flight. Installation validation checks files and byte counts without loading or compiling models.
+
+Idle models unload after 60 seconds. Set `VOX_ASR_IDLE_SECONDS` before starting the host to change this timeout; `0` disables eviction. Embedded streaming callers can also call `setIdleUnload(seconds:)`. Active sessions are not evicted. Preload again after an idle unload. `transcribe.stream.status` and `models.list` expose current residency and planned placement. Streaming telemetry preserves `clientId`, `route: "transcribe.streaming"`, and `modelId`.
+
 # Models and plugins
 
 Source: /docs/models
@@ -1082,6 +1160,7 @@ These families run without a plugin:
 
 | Family | Default or typical ids | How it runs |
 |---|---|---|
+| `coreml-streaming` | `nemotron:streaming-560ms`, `parakeet:eou-320ms` | Native Swift/Core ML streaming; verified ANE encoder |
 | `parakeet-tdt` | `parakeet:v3` (default), `parakeet:v2` (English) | On-device CoreML |
 | `apple-speech` | `apple:speech-transcriber` | On-device Speech framework; macOS 26+ |
 | `openai-transcribe` | `gpt-transcribe`, `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, `whisper-1` | OpenAI Audio API; needs `OPENAI_API_KEY` |
@@ -1099,7 +1178,9 @@ Apple SpeechTranscriber is registered by the default daemon, so selecting its mo
 - `mlx-community/cohere-transcribe-03-2026-mlx-8bit`: strong offline multilingual candidate; not a realtime model.
 - `mlx-community/nemotron-3.5-asr-streaming-0.6b-8bit`: 0.6B cache-aware streaming RNNT candidate covering 35 languages.
 
-Catalog `capabilities.liveTranscription` describes what Vox exposes today, not what an upstream model architecture can theoretically do. It remains `false` for every current provider because Vox's public ASR contract still accepts a completed audio file and returns finalized text. Apple and Nemotron are streaming-capable foundations for the next runtime slice, but selecting them does not yet turn `session.partial` into model-backed partial transcription.
+Catalog `capabilities.liveTranscription` describes the Vox surface, not just the upstream model. Native `coreml-streaming` models expose model-backed partials through `NativeStreamingASR.shared` and the app-captured `transcribe.stream.*` routes. Other file-only providers retain `liveTranscription=false`. The older daemon-microphone `transcribe.startSession` flow still transcribes after recording stops.
+
+Native streaming requires Apple Silicon and macOS 14.4 / iOS 17.4, so Vox can verify encoder placement with `MLComputePlan`. Install and preload explicitly. One process-wide native ASR slot serves batch and streaming; idle models unload after a configurable timeout. See [Native PCM streaming](./runtime.md#native-pcm-streaming) for ownership, backpressure, timestamps, and endpoint semantics. `parakeet:v3` remains the default file model on the pinned August 19 conversion.
 
 Vox does not ship Intel support. Local runtime entries are marked `architectures: ["arm64"]`. Audio conversion for native model inputs uses platform or provider libraries; do not add hand-written sample-rate conversion or denoising code to a model adapter.
 
@@ -1344,7 +1425,7 @@ Notes:
 - NVIDIA Magpie accepts `NV_API_KEY` and the `NVIDIA_API_KEY` compatibility alias, plus camelCase / snake_case variants. Gemini accepts `GEMINI_API_KEY`, `GOOGLE_API_KEY`, and `GOOGLE_GENAI_API_KEY`.
 - Remote providers are considered for default model selection and in-process default registration only when they are configured in `providers.json` or the daemon environment. An API key in the process environment is not broader user consent than selecting or configuring that provider. Configured aliases such as `magpie`, `groq-tts`, and `google-tts` prevent the canonical default entries from being appended over that family's routing and key config.
 - If `providers.json` contains only ASR entries, Vox falls back to default TTS providers. The inverse is also true. The default TTS model remains `gpt-4o-mini-tts` when OpenAI is configured. App-registry and daemon/config default selection share one canonical ranking independent of `providers.json` order and independent of the alphabetically sorted `TTSProviderRegistry` model list: OpenAI `gpt-4o-mini-tts`, then ElevenLabs, MiniMax, NVIDIA Magpie, Groq, Gemini, then `avspeech:system`.
-- The public ASR provider method is currently file-based. Apple SpeechTranscriber and Nemotron have streaming-capable internals, but live partial events require a separate runtime/protocol integration.
+- `ASRProvider.transcribe` and the external provider protocol remain file-based. Native Core ML streaming has a separate PCM API, `NativeStreamingASR.shared`, and companion `transcribe.stream.*` routes. These emit model-backed cumulative partials; see [Runtime](./runtime.md#native-pcm-streaming).
 - Native audio adaptation uses `AVAudioConverter`, SpeechAnalyzer's file path, or provider-owned conversion. Provider adapters must not implement ad hoc resampling or denoising.
 
 ### OpenAI TTS timeout
@@ -1959,6 +2040,12 @@ On the daemon side, set `VOX_PORT` or `VOX_HOST` environment variables to overri
 - benchmark with representative audio clips and read `inferenceMs` separately from `totalMs`
 - preserve raw transcription and synthesis metrics in your own telemetry if the app already exports traces
 
+## App-captured PCM streaming
+
+Call `preloadModel(modelId)` explicitly, then `startPCMStream(modelId)`. Feed mono 16 kHz `Float32Array` packets with `appendPCMStream(sessionId, sequence, samples)`. Each packet contains 1–16000 finite samples. Await the acknowledgement and use its `nextSequence` before sending another packet. Read cumulative text, approximate word timings, and endpoint notifications from `updates`.
+
+Call `finishPCMStream(sessionId)` to flush and return the final transcript. Call `cancelPCMStream(sessionId)` to discard pending audio and text. `nativeStreamingStatus()` exposes residency, ownership, and the encoder's planned ANE/CPU placement. An endpoint notification does not implicitly finish a session. Disconnect cancels ownership; reconnect requires a new session. See the [wire contract](./runtime.md#pcm-wire-contract).
+
 # Web Integration (Companion Client)
 
 Source: /docs/web-integration
@@ -2233,6 +2320,7 @@ Current emitted performance routes:
 
 - `transcribe.file`
 - `transcribe.live`
+- `transcribe.streaming`
 - `synthesize.generate`
 - `synthesize.startSession`
 
@@ -2286,6 +2374,14 @@ vox perf dashboard --client vox-cli
 - Large `modelLoadMs` spikes are warm-up events, not inference regressions.
 
 See [Runtime](./runtime.md) for emitted routes and [API](./api.md) for the current performance sample shape.
+
+## Native ASR measurements
+
+Build `vox-asr-bench` with `swift build --package-path swift -c release --product vox-asr-bench`. It accepts a model id, an explicit streaming model bundle directory, and a mono 16 kHz WAV. A directory of WAV files with matching `.txt` references produces a multi-utterance report. Batch `parakeet:v3` uses its installed `VOX_HOME` cache rather than the directory argument.
+
+The JSON report separates preload and priming from dictation. It reports process `phys_footprint` in decimal MB, per-chunk latency, input-audio time at the first partial, unpaced compute time to that partial, and the encoder's compute-plan placement. Add `--paced` to feed capture packets in real time and measure wall-clock first-partial latency. Unpaced compute time is not user-perceived latency. WER scoring lowercases text and removes punctuation; it does not normalize abbreviations or number spellings.
+
+These measurements exclude other processes and system-wide accelerator memory. Compare candidates on the same audio, host, and build configuration. A small smoke corpus is not a production accuracy evaluation.
 
 # Architecture
 
@@ -2415,6 +2511,7 @@ Catalog JSON may include `plugins[]`. Plugin install is a CLI file-system action
 
 ### Transcription
 
+- `transcribe.stream.start`, `transcribe.stream.append`, `transcribe.stream.finish`, `transcribe.stream.cancel`, `transcribe.stream.status` (app-captured PCM; [wire contract](./runtime.md#pcm-wire-contract))
 - `transcribe.file`
 - `transcribe.startSession`
 - `transcribe.sessionStatus`
@@ -2449,6 +2546,7 @@ type PerformanceRoute =
   | "annotate.file"
   | "transcribe.file"
   | "transcribe.live"
+  | "transcribe.streaming"
   | "synthesize.generate"
   | "synthesize.startSession"
   | string;
@@ -2492,6 +2590,7 @@ Current emitted performance routes:
 - `transcribe.file`
 - `annotate.file`
 - `transcribe.live`
+- `transcribe.streaming`
 - `synthesize.generate`
 - `synthesize.startSession`
 
@@ -2903,6 +3002,9 @@ Source: docs/agent/api.agent.md
 - synthesis options include optional speech timing and allowlisted OpenAI/NVIDIA/Groq/Gemini credentials; ElevenLabs and MiniMax keys are not lent per-request
 - performance samples preserve `clientId`, `route`, `modelId`, and optional `voiceId`
 
+- Native PCM routes: transcribe.stream.start|append|finish|cancel|status, separate from microphone startSession. See runtime brief for full identity/sequence/PCM contract.
+- SDK: startPCMStream, appendPCMStream, finishPCMStream, cancelPCMStream, nativeStreamingStatus.
+
 # Apple Embed Facts
 
 Source: docs/agent/apple-embed.agent.md
@@ -2948,7 +3050,7 @@ Source: docs/agent/apple-embed.agent.md
 
 ## Default embed engines
 
-- ASR default: `EngineManager()` -> `ParakeetProvider()`
+- ASR default: `EngineManager()` -> `NativeASRProvider()` (batch Parakeet + explicit native streaming models)
 - TTS generation default: `TTSEngineManager()` -> `TTSProviderRegistry` with every built-in provider (OpenAI, ElevenLabs, MiniMax, NVIDIA, Groq, Gemini, AVSpeech); routes by model id, never falls back between providers
 - TTS playback is not on `TTSProvider`; optional Apple playback is `AppleSpeechOutputController`
 - default ASR model id: `parakeet:v3`
@@ -3014,8 +3116,7 @@ Source: docs/agent/apple-embed.agent.md
 
 - `VoxDictation` covers dictation only; `VoxAppleSpeech` is separate playback
 - no microphone capture on iOS yet
-- no public embed live-session coordinator yet (no partial text while recording)
-- no raw-buffer ASR API yet
+- `VoxDictation` remains record-then-transcribe; use `NativeStreamingASR.shared` for PCM partials
 - no automatic telemetry recording outside `VoxDictation`
 - `VoxAppleSpeech` does not own browser playback or app product policy
 
@@ -3035,6 +3136,19 @@ Xcode copies SwiftPM resource bundles automatically. When packaging by hand, cop
 `SpeechEngineResources` resolves the model catalog and mlx-audio provider script
 from that location in apps, and from SwiftPM resources in command-line builds.
 A packaged app does not fall back to a developer build directory.
+
+## Native streaming
+
+- `NativeStreamingASR.shared` is exported by VoxEngine; Apple Silicon, macOS 14.4 / iOS 17.4+.
+- Explicit install / preload; default streaming id from StreamingASRDefaults.modelId.
+- `preload(modelId:directory:language:progress:)` supports an explicit offline bundle.
+- `begin(clientId:modelId:)` -> UUID; requires ready model; one owner.
+- `append(sessionId:clientId:samples:)` -> [StreamingASRUpdate]; 1–16000 finite mono 16 kHz float32 samples, await each call.
+- `finish(sessionId:clientId:)` flushes -> final update; cancel discards.
+- Cumulative text, approximate RNNT words, explicit endpointSource; endpoints do not auto-stop.
+- Process-wide residency shared with batch; idle unload 60 s, configurable; preload again after eviction.
+- `status()` exposes actual planned encoder placement from MLComputePlan, not requested computeUnits or a hardware trace.
+- Several app processes intentionally share one voxd private authenticated Unix endpoint; do not load separate engines per app.
 
 # Architecture Facts
 
@@ -3072,7 +3186,7 @@ Source: docs/agent/models.agent.md
 - native core ASR: `apple:speech-transcriber` on macOS 26+
 - Apple locale env: `VOX_APPLE_SPEECH_LOCALE`
 - recommended MLX candidates: `mlx-community/Qwen3-ASR-1.7B-8bit`, `mlx-community/cohere-transcribe-03-2026-mlx-8bit`, `mlx-community/nemotron-3.5-asr-streaming-0.6b-8bit`
-- catalog capability flags describe the current Vox provider surface; `liveTranscription=false` until the ASR protocol and mic path emit model-backed partials
+- Native coreml-streaming models have liveTranscription=true through NativeStreamingASR.shared / transcribe.stream.*; file-only models remain false. Old daemon-microphone startSession remains record-then-transcribe.
 - never add hand-written resampling or denoising inside a model adapter; use platform/provider DSP libraries
 - OpenAI file ASR: `gpt-transcribe`, `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, `whisper-1`
 - plugins CLI: `vox plugins list|install|remove`
@@ -3087,6 +3201,12 @@ Source: docs/agent/models.agent.md
 - Whistle adapter uses Symphonia/Rubato for audio conversion; `liveTranscription=false`
 - Whistle assets: `VOX_HOME/models/whistle`; transcribe can cold-load installed assets but cannot download them
 - Whistle env: `VOX_WHISTLE_LANGUAGE` (en/de/fr/es/it/nl/pl, unset auto), `VOX_WHISTLE_KEYWORDS` (comma-separated)
+
+- Native ASR requires Apple Silicon, macOS 14.4 / iOS 17.4 for compute-plan verification.
+- Default live id: StreamingASRDefaults.modelId; file default: parakeet:v3, pinned 7dd20fe (August 19 conversion).
+- Models/preload surfaces include planned computePlacement; streaming status exposes residency and owner.
+- CoreML streaming installation is disk-only; preload explicitly loads/primes; idle unload default 60 s.
+- Batch and streaming share one process-wide native model slot; multiple app processes use one authenticated private Unix host.
 
 # Observability Facts
 
@@ -3108,6 +3228,11 @@ Source: docs/agent/observability.agent.md
   - `modelId`
   - `voiceId` for synthesis
 
+- Native streaming performance route: `transcribe.streaming`, preserving clientId/modelId.
+- `vox-asr-bench` (Swift executable) reports physical process footprint, per-chunk latency, first partial by input-audio time and unpaced compute time, planned placement, and normalized WER when references exist.
+- Benchmark takes model id, explicit streaming model directory (batch uses installed VOX_HOME cache), and a mono 16 kHz WAV or a directory of WAV + matching .txt references. Use `--paced` for wall-clock first-partial latency.
+- Run a release build; distinguish cold preload/ANE compile time from warm inference, and process footprint from system-wide accelerator memory.
+
 # Vox Facts
 
 Source: docs/agent/overview.agent.md
@@ -3118,7 +3243,7 @@ Source: docs/agent/overview.agent.md
 - deployment modes:
   - embed mode: Swift packages inside the app process
   - companion mode: `voxd` for web, browser, and shared-process clients
-- default ASR embed engine: `EngineManager()` -> `ParakeetProvider()`
+- default ASR embed engine: `EngineManager()` -> `NativeASRProvider()` (batch Parakeet + explicit native streaming models)
 - default TTS embed engine: `TTSEngineManager()` -> `TTSProviderRegistry`
 - optional Apple TTS playback: `VoxAppleSpeech` / `AppleSpeechOutputController`
 - companion service: `VoxRuntimeService`
@@ -3166,7 +3291,7 @@ Source: docs/agent/providers.agent.md
 - provider state may cache weights, but crash/restart must remain safe
 - canonical implementations: `swift/Sources/HudsonSpeechEngine/` built-in providers plus `ExternalProvider.swift` and `ExternalTTSProvider.swift`
 - published catalog: `https://voxd.cc/data/models.json` from repo `data/models.json`
-- catalog families the engine can run: `parakeet-tdt`, `apple-speech`, `mlx-audio`, `openai-transcribe`
+- catalog families the engine can run: `coreml-streaming`, `parakeet-tdt`, `apple-speech`, `mlx-audio`, `openai-transcribe`
 - catalog plugins: `plugins[]` plus model `plugin` id; install writes `~/.vox/plugins/<id>/provider.json`
 - Gemma 4 E2B: plugin `mlx-vlm`; `vox plugins install mlx-vlm`
 - Whistle: optional `whistle` plugin/model, prebuilt Needle runtime in a separate Rust process; file ASR <=30 seconds, word timings, no live partials
@@ -3187,7 +3312,7 @@ Source: docs/agent/providers.agent.md
 - native alternative: `apple:speech-transcriber`
 - MLX shortlist: Qwen3-ASR 1.7B, Cohere Transcribe 03-2026, Nemotron 3.5 ASR Streaming 0.6B
 - supported architecture: Apple Silicon (`arm64`) only; no Intel support
-- current provider `transcribe` is file-based; do not claim model-backed partials from upstream streaming capability
+- ASRProvider.transcribe / external provider transcribe remain file-based. NativeStreamingASR.shared and transcribe.stream.* are a separate native PCM surface with model-backed partials.
 - model adapters use platform/provider audio conversion; never add hand-written resampling or denoising
 - remote OpenAI ASR: `gpt-transcribe`, `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, `whisper-1`
 - override catalog URL with `VOX_MODEL_CATALOG_URL`
@@ -3237,6 +3362,26 @@ Source: docs/agent/runtime.agent.md
 - Private registry metadata includes `socketPath` and `port: 0`; host capability discovery owns this mode. Standalone CLI/browser TCP behavior is unchanged.
 - Frame bounds: 16 MiB inbound, 32 MiB queued outbound; connection ID and client ID still own sessions.
 
+## Native app-captured PCM
+
+- Default streaming model: `StreamingASRDefaults.modelId`; batch default stays `parakeet:v3`.
+- Install and preload explicitly with `models.install` / `models.preload`; start never downloads or warms.
+- Routes: `transcribe.stream.start|append|finish|cancel|status`; separate from the old daemon-microphone sessions.
+- Start: clientId + modelId -> sessionId, 16 kHz mono float32le, nextSequence=0, maxPacketSamples=16000.
+- Append: clientId + sessionId + sequence + audioBase64; await ack nextSequence + updates[] before next packet.
+- Updates: cumulative text, words (seconds), processedAudioMs, chunkLatencyMs, endOfUtterance, optional endpointSource.
+- Word timings are greedy RNNT emission frames, not forced alignment.
+- Endpoint source: `model` for Parakeet EOU; `blank-duration` for Nemotron (1120 ms); endpoint does not auto-stop.
+- Finish flushes -> result; cancel discards -> cancelled, no final transcript.
+- Connection AND clientId AND sessionId own mutation; disconnect cancels; 120 s session limit.
+- One acknowledged packet in flight; no uncertain append retries; reconnect means new session.
+- Shared native model slot spans batch and streaming; exclusive active lease; unload previous before switching.
+- MLComputePlan verifies ANE compute placement after load, retries once, fails closed; planned placement, not execution trace.
+- Idle unload default 60 s; VOX_ASR_IDLE_SECONDS=0 disables; preload after eviction.
+- Private Unix transport is intentional cross-process mode for Talkie and other app processes.
+
+- Standalone voxd: set VOX_SOCKET_PATH + VOX_AUTH_TOKEN for the same private transport; no TCP listener in that mode.
+
 # SDK Facts
 
 Source: docs/agent/sdk.agent.md
@@ -3259,6 +3404,9 @@ Source: docs/agent/sdk.agent.md
 - live session method exposed: `createLiveSession`; it returns `VoxLiveSession` synchronously
 - synthesis can return optional `speechTiming`; read the types in `packages/client/src/types.ts` before duplicating shapes
 - per-request `credentials` are allowlisted for OpenAI, NVIDIA Magpie, Groq, and Gemini/Google only
+
+- Native PCM: preloadModel explicitly, startPCMStream(modelId), appendPCMStream(sessionId,sequence,Float32Array) -> nextSequence+updates, finishPCMStream -> final update, cancelPCMStream -> discard, nativeStreamingStatus.
+- 1–16000 finite mono 16 kHz samples; await each packet acknowledgement; no uncertain retries; cumulative text + approximate word timestamps + endpointSource.
 
 # Operations Facts
 

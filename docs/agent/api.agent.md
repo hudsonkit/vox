@@ -9,3 +9,6 @@
 - `createLiveSession()` is synchronous and returns `VoxLiveSession`
 - synthesis options include optional speech timing and allowlisted OpenAI/NVIDIA/Groq/Gemini credentials; ElevenLabs and MiniMax keys are not lent per-request
 - performance samples preserve `clientId`, `route`, `modelId`, and optional `voiceId`
+
+- Native PCM routes: transcribe.stream.start|append|finish|cancel|status, separate from microphone startSession. See runtime brief for full identity/sequence/PCM contract.
+- SDK: startPCMStream, appendPCMStream, finishPCMStream, cancelPCMStream, nativeStreamingStatus.

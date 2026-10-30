@@ -141,3 +141,9 @@ On the daemon side, set `VOX_PORT` or `VOX_HOST` environment variables to overri
 - call `listVoices(modelId)` before pinning a TTS voice in product code
 - benchmark with representative audio clips and read `inferenceMs` separately from `totalMs`
 - preserve raw transcription and synthesis metrics in your own telemetry if the app already exports traces
+
+## App-captured PCM streaming
+
+Call `preloadModel(modelId)` explicitly, then `startPCMStream(modelId)`. Feed mono 16 kHz `Float32Array` packets with `appendPCMStream(sessionId, sequence, samples)`. Each packet contains 1–16000 finite samples. Await the acknowledgement and use its `nextSequence` before sending another packet. Read cumulative text, approximate word timings, and endpoint notifications from `updates`.
+
+Call `finishPCMStream(sessionId)` to flush and return the final transcript. Call `cancelPCMStream(sessionId)` to discard pending audio and text. `nativeStreamingStatus()` exposes residency, ownership, and the encoder's planned ANE/CPU placement. An endpoint notification does not implicitly finish a session. Disconnect cancels ownership; reconnect requires a new session. See the [wire contract](./runtime.md#pcm-wire-contract).

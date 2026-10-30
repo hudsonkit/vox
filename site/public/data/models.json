@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "updatedAt": "2026-10-08",
+  "updatedAt": "2026-10-30",
   "plugins": [
     {
       "id": "whistle",
@@ -60,8 +60,8 @@
       "status": "ready",
       "default": true,
       "languages": "25 European languages",
-      "notes": "Default on-device dictation model. Multilingual FastConformer-TDT.",
-      "platforms": ["macOS 14+"],
+      "notes": "Default file-transcription model. Multilingual FastConformer-TDT; pinned August 19 Core ML conversion. For model-backed live partials use the native streaming models.",
+      "platforms": ["macOS 14.4+", "iOS 17.4+"],
       "architectures": ["arm64"],
       "capabilities": {
         "fileTranscription": true,
@@ -71,10 +71,11 @@
       },
       "source": {
         "type": "huggingface",
-        "repo": "FluidInference/parakeet-tdt-0.6b-v3-coreml"
+        "repo": "FluidInference/parakeet-tdt-0.6b-v3-coreml",
+        "revision": "7dd20fe6b1797d35f5e3307e8b1732d9a178edfe"
       },
       "parakeet": {
-        "cacheDirectoryName": "parakeet-tdt-0.6b-v3",
+        "cacheDirectoryName": "parakeet-tdt-0.6b-v3-7dd20fe",
         "jointFile": "JointDecisionv3.mlmodelc",
         "vocabularyFile": "parakeet_vocab.json",
         "blankId": 8192,
@@ -96,7 +97,7 @@
       "status": "ready",
       "languages": "English",
       "notes": "English-only TDT with a tighter vocabulary and better English recall.",
-      "platforms": ["macOS 14+"],
+      "platforms": ["macOS 14.4+", "iOS 17.4+"],
       "architectures": ["arm64"],
       "capabilities": {
         "fileTranscription": true,
@@ -310,7 +311,9 @@
       "status": "ready",
       "languages": "multilingual",
       "notes": "Current OpenAI file-transcription model.",
-      "requires": ["OPENAI_API_KEY"],
+      "requires": [
+        "OPENAI_API_KEY"
+      ],
       "platforms": ["macOS 14+"],
       "architectures": ["arm64"],
       "capabilities": {
@@ -329,7 +332,9 @@
       "runtime": "remote",
       "status": "ready",
       "languages": "multilingual",
-      "requires": ["OPENAI_API_KEY"],
+      "requires": [
+        "OPENAI_API_KEY"
+      ],
       "platforms": ["macOS 14+"],
       "architectures": ["arm64"],
       "capabilities": {
@@ -348,7 +353,9 @@
       "runtime": "remote",
       "status": "ready",
       "languages": "multilingual",
-      "requires": ["OPENAI_API_KEY"],
+      "requires": [
+        "OPENAI_API_KEY"
+      ],
       "platforms": ["macOS 14+"],
       "architectures": ["arm64"],
       "capabilities": {
@@ -368,7 +375,9 @@
       "status": "ready",
       "languages": "multilingual",
       "notes": "Legacy OpenAI Whisper API. The current Vox bridge uses finalized file transcription and does not yet request its timestamp or caption response formats.",
-      "requires": ["OPENAI_API_KEY"],
+      "requires": [
+        "OPENAI_API_KEY"
+      ],
       "platforms": ["macOS 14+"],
       "architectures": ["arm64"],
       "capabilities": {
@@ -400,6 +409,102 @@
       "source": {
         "type": "huggingface",
         "repo": "mlx-community/gemma-4-E2B-it-4bit"
+      }
+    },
+    {
+      "id": "nemotron:streaming-560ms",
+      "kind": "asr",
+      "family": "coreml-streaming",
+      "name": "Nemotron 3.5 Streaming Latin 560 ms",
+      "vendor": "nvidia",
+      "runtime": "coreml",
+      "status": "ready",
+      "languages": "English, Spanish, French, Italian, Portuguese, German",
+      "notes": "Default native streaming. Cache-aware ANE encoder, cumulative partials and greedy emission-frame word timings. End-of-utterance uses 1120 ms of RNNT blank duration, not a trained EOU token. English-US is the companion default; language-selectable embedded preload.",
+      "platforms": ["macOS 14.4+", "iOS 17.4+"],
+      "architectures": ["arm64"],
+      "capabilities": {
+        "fileTranscription": true,
+        "liveTranscription": true,
+        "onDevice": true,
+        "wordTimestamps": true
+      },
+      "source": {
+        "type": "huggingface",
+        "repo": "FluidInference/Nemotron-3.5-ASR-Streaming-Multilingual-0.6b-CoreML",
+        "revision": "1a41b75758b0337ff67db7d5408280aaaf23074e"
+      }
+    },
+    {
+      "id": "nemotron:en-streaming-560ms",
+      "kind": "asr",
+      "family": "coreml-streaming",
+      "name": "Nemotron English Streaming 560 ms",
+      "vendor": "nvidia",
+      "runtime": "coreml",
+      "status": "ready",
+      "languages": "English",
+      "notes": "Native cache-aware streaming, int8 encoder. RNNT blank-duration endpointing.",
+      "platforms": ["macOS 14.4+", "iOS 17.4+"],
+      "architectures": ["arm64"],
+      "capabilities": {
+        "fileTranscription": true,
+        "liveTranscription": true,
+        "onDevice": true,
+        "wordTimestamps": true
+      },
+      "source": {
+        "type": "huggingface",
+        "repo": "FluidInference/nemotron-speech-streaming-en-0.6b-coreml",
+        "revision": "e673531caa6d25ab7baf5a8c14c9b99ba1551838"
+      }
+    },
+    {
+      "id": "parakeet:eou-320ms",
+      "kind": "asr",
+      "family": "coreml-streaming",
+      "name": "Parakeet Realtime EOU 120M 320 ms",
+      "vendor": "nvidia",
+      "runtime": "coreml",
+      "status": "ready",
+      "languages": "English",
+      "notes": "Native streaming with trained EOU token. 630 ms input window, 320 ms stride, approximate word timestamps.",
+      "platforms": ["macOS 14.4+", "iOS 17.4+"],
+      "architectures": ["arm64"],
+      "capabilities": {
+        "fileTranscription": true,
+        "liveTranscription": true,
+        "onDevice": true,
+        "wordTimestamps": true
+      },
+      "source": {
+        "type": "huggingface",
+        "repo": "FluidInference/parakeet-realtime-eou-120m-coreml",
+        "revision": "40a23f4c0b333aa17ad8c0f2ea47ec2347f2f355"
+      }
+    },
+    {
+      "id": "parakeet:eou-160ms",
+      "kind": "asr",
+      "family": "coreml-streaming",
+      "name": "Parakeet Realtime EOU 120M 160 ms",
+      "vendor": "nvidia",
+      "runtime": "coreml",
+      "status": "ready",
+      "languages": "English",
+      "notes": "Native streaming with trained EOU token. 160 ms input window, 80 ms stride; accuracy tradeoff at smallest context.",
+      "platforms": ["macOS 14.4+", "iOS 17.4+"],
+      "architectures": ["arm64"],
+      "capabilities": {
+        "fileTranscription": true,
+        "liveTranscription": true,
+        "onDevice": true,
+        "wordTimestamps": true
+      },
+      "source": {
+        "type": "huggingface",
+        "repo": "FluidInference/parakeet-realtime-eou-120m-coreml",
+        "revision": "40a23f4c0b333aa17ad8c0f2ea47ec2347f2f355"
       }
     }
   ]

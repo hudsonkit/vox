@@ -39,7 +39,7 @@
 
 ## Default embed engines
 
-- ASR default: `EngineManager()` -> `ParakeetProvider()`
+- ASR default: `EngineManager()` -> `NativeASRProvider()` (batch Parakeet + explicit native streaming models)
 - TTS generation default: `TTSEngineManager()` -> `TTSProviderRegistry` with every built-in provider (OpenAI, ElevenLabs, MiniMax, NVIDIA, Groq, Gemini, AVSpeech); routes by model id, never falls back between providers
 - TTS playback is not on `TTSProvider`; optional Apple playback is `AppleSpeechOutputController`
 - default ASR model id: `parakeet:v3`
@@ -105,8 +105,7 @@
 
 - `VoxDictation` covers dictation only; `VoxAppleSpeech` is separate playback
 - no microphone capture on iOS yet
-- no public embed live-session coordinator yet (no partial text while recording)
-- no raw-buffer ASR API yet
+- `VoxDictation` remains record-then-transcribe; use `NativeStreamingASR.shared` for PCM partials
 - no automatic telemetry recording outside `VoxDictation`
 - `VoxAppleSpeech` does not own browser playback or app product policy
 
@@ -126,3 +125,16 @@ Xcode copies SwiftPM resource bundles automatically. When packaging by hand, cop
 `SpeechEngineResources` resolves the model catalog and mlx-audio provider script
 from that location in apps, and from SwiftPM resources in command-line builds.
 A packaged app does not fall back to a developer build directory.
+
+## Native streaming
+
+- `NativeStreamingASR.shared` is exported by VoxEngine; Apple Silicon, macOS 14.4 / iOS 17.4+.
+- Explicit install / preload; default streaming id from StreamingASRDefaults.modelId.
+- `preload(modelId:directory:language:progress:)` supports an explicit offline bundle.
+- `begin(clientId:modelId:)` -> UUID; requires ready model; one owner.
+- `append(sessionId:clientId:samples:)` -> [StreamingASRUpdate]; 1–16000 finite mono 16 kHz float32 samples, await each call.
+- `finish(sessionId:clientId:)` flushes -> final update; cancel discards.
+- Cumulative text, approximate RNNT words, explicit endpointSource; endpoints do not auto-stop.
+- Process-wide residency shared with batch; idle unload 60 s, configurable; preload again after eviction.
+- `status()` exposes actual planned encoder placement from MLComputePlan, not requested computeUnits or a hardware trace.
+- Several app processes intentionally share one voxd private authenticated Unix endpoint; do not load separate engines per app.

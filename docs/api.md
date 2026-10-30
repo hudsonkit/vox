@@ -30,6 +30,7 @@ Catalog JSON may include `plugins[]`. Plugin install is a CLI file-system action
 
 ### Transcription
 
+- `transcribe.stream.start`, `transcribe.stream.append`, `transcribe.stream.finish`, `transcribe.stream.cancel`, `transcribe.stream.status` (app-captured PCM; [wire contract](./runtime.md#pcm-wire-contract))
 - `transcribe.file`
 - `transcribe.startSession`
 - `transcribe.sessionStatus`
@@ -64,6 +65,7 @@ type PerformanceRoute =
   | "annotate.file"
   | "transcribe.file"
   | "transcribe.live"
+  | "transcribe.streaming"
   | "synthesize.generate"
   | "synthesize.startSession"
   | string;
@@ -107,6 +109,7 @@ Current emitted performance routes:
 - `transcribe.file`
 - `annotate.file`
 - `transcribe.live`
+- `transcribe.streaming`
 - `synthesize.generate`
 - `synthesize.startSession`
 

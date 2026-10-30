@@ -22,7 +22,8 @@ let package = Package(
         .library(name: "VoxBridge", targets: ["VoxBridge"]),
         .executable(name: "voxbridge", targets: ["VoxBridgeRunner"]),
         .executable(name: "voxttsd", targets: ["VoxTTSRunner"]),
-        .executable(name: "voxd", targets: ["voxd"])
+        .executable(name: "voxd", targets: ["voxd"]),
+        .executable(name: "vox-asr-bench", targets: ["VoxASRBench"])
     ],
     targets: [
         .target(name: "VoxCore"),
@@ -72,6 +73,7 @@ let package = Package(
                 ], .when(platforms: [.macOS]))
             ]
         ),
+        .executableTarget(name: "VoxASRBench", dependencies: ["VoxCore", "HudsonSpeechEngine"]),
         .testTarget(
             name: "VoxCoreTests",
             dependencies: ["VoxCore"]

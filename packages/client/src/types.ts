@@ -49,6 +49,7 @@ export interface DoctorReport {
 }
 
 export interface ModelInfo {
+  computePlacement?: CoreMLPlacement;
   id: string;
   name: string;
   backend: string;
@@ -81,6 +82,7 @@ export interface SpeechModelCatalogEntry {
   source?: {
     type: string;
     repo?: string;
+  revision?: string;
   };
 }
 
@@ -393,4 +395,44 @@ export interface TransportEvents {
   close: { code: number; reason: string };
   event: { event: string; data: Record<string, unknown> };
   error: { error: Error };
+}
+
+/** Planned Core ML encoder placement, not a hardware execution trace. */
+export interface CoreMLPlacement {
+  neuralEngineOperations: number;
+  cpuOperations: number;
+  gpuOperations: number;
+  unknownOperations: number;
+  neuralEngineComputeOperations: number;
+  cpuComputeOperations: number;
+  neuralEngineEstimatedCost: number;
+  cpuEstimatedCost: number;
+}
+
+export interface StreamingASRUpdate {
+  text: string;
+  words: WordTiming[];
+  endOfUtterance: boolean;
+  endpointSource?: "model" | "blank-duration";
+  processedAudioMs: number;
+  chunkLatencyMs: number;
+}
+
+export interface NativeStreamingStatus {
+  modelId?: string;
+  loadingModelId?: string;
+  placement?: CoreMLPlacement;
+  activeSessionId?: string;
+  clientId?: string;
+  idleUnloadSeconds: number;
+}
+
+export interface PCMStreamingSession {
+  sessionId: string;
+  modelId: string;
+  sampleRate: 16000;
+  channels: 1;
+  encoding: "float32le";
+  maxPacketSamples: 16000;
+  nextSequence: number;
 }

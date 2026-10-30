@@ -141,9 +141,9 @@ public final class ModelCatalogStore: @unchecked Sendable {
                 runtime: "coreml",
                 isDefault: true,
                 languages: "25 European languages",
-                source: SpeechModelSource(type: "huggingface", repo: "FluidInference/parakeet-tdt-0.6b-v3-coreml"),
+                source: SpeechModelSource(type: "huggingface", repo: "FluidInference/parakeet-tdt-0.6b-v3-coreml", revision: "7dd20fe6b1797d35f5e3307e8b1732d9a178edfe"),
                 parakeet: ParakeetCatalogSpec(
-                    cacheDirectoryName: "parakeet-tdt-0.6b-v3",
+                    cacheDirectoryName: "parakeet-tdt-0.6b-v3-7dd20fe",
                     jointFile: "JointDecisionv3.mlmodelc",
                     vocabularyFile: "parakeet_vocab.json",
                     blankId: 8192,

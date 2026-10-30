@@ -15,6 +15,7 @@ public final class VoxRuntimeService: @unchecked Sendable {
     private let history: SpeechHistoryRecorder
     private let recorder = MicrophoneFileRecorder()
     private let sessions = LiveSessionCoordinator()
+    private let streamingSessions = StreamingSessionCoordinator()
     private let synthesisSessions = SynthesisSessionCoordinator()
     private let startedAt = Date()
     private let preferencesLoader: @Sendable () -> VoxPreferences
@@ -72,6 +73,7 @@ public final class VoxRuntimeService: @unchecked Sendable {
 
     public func stop() {
         bridge.stop()
+        Task { await streamingSessions.shutdown() }
         try? RuntimeRegistry.remove()
     }
 
@@ -694,6 +696,7 @@ public final class VoxRuntimeService: @unchecked Sendable {
 
     private func registerHandlers() {
         bridge.onClientDisconnected = { [weak self] connectionID in
+            Task { await self?.streamingSessions.disconnect(connectionID: connectionID) }
             guard let self else { return }
             Task {
                 await self.handleDisconnect(connectionID: connectionID)
@@ -1095,6 +1098,59 @@ public final class VoxRuntimeService: @unchecked Sendable {
             self.registerInFlightSynthesisGenerate(task, connectionID: connectionID, taskID: taskID)
         }
 
+        bridge.handle("transcribe.stream.status") { _, reply in
+            Task {
+                do { reply(try Self.codableDictionary(await NativeStreamingASR.shared.status()), nil) }
+                catch { reply(nil, error.localizedDescription) }
+            }
+        }
+        bridge.handle("transcribe.stream.start") { [weak self] params, reply in
+            guard let self else { return }
+            let parameters = StreamParameters(params)
+            Task {
+                do {
+                    guard let connectionID = parameters.connectionID, let clientId = parameters.clientId, !clientId.isEmpty else { throw StreamingASRError.invalidSession }
+                    let modelId = parameters.modelId ?? StreamingASRDefaults.modelId
+                    let id = try await self.streamingSessions.start(connectionID: connectionID, clientId: clientId, modelId: modelId)
+                    reply(["sessionId": id.uuidString, "modelId": modelId, "sampleRate": 16000, "channels": 1, "encoding": "float32le", "maxPacketSamples": 16000, "nextSequence": 0], nil)
+                } catch { reply(nil, error.localizedDescription) }
+            }
+        }
+        bridge.handle("transcribe.stream.append") { [weak self] params, reply in
+            guard let self else { return }
+            let parameters = StreamParameters(params)
+            Task {
+                do {
+                    let (id, connectionID, clientId) = try Self.streamIdentity(parameters)
+                    guard let sequence = parameters.sequence, let audio = parameters.audioBase64 else { throw StreamingASRError.invalidAudio }
+                    let updates = try await self.streamingSessions.append(id: id, connectionID: connectionID, clientId: clientId, sequence: sequence, samples: StreamingPCM.decode(audio))
+                    reply(["sessionId": id.uuidString, "nextSequence": sequence + 1, "updates": try updates.map(Self.codableDictionary)], nil)
+                } catch { reply(nil, error.localizedDescription) }
+            }
+        }
+        bridge.handle("transcribe.stream.finish") { [weak self] params, reply in
+            guard let self else { return }
+            let parameters = StreamParameters(params)
+            Task {
+                do {
+                    let (id, connectionID, clientId) = try Self.streamIdentity(parameters)
+                    let result = try await self.streamingSessions.finish(id: id, connectionID: connectionID, clientId: clientId)
+                    reply(["sessionId": id.uuidString, "result": try Self.codableDictionary(result)], nil)
+                } catch { reply(nil, error.localizedDescription) }
+            }
+        }
+        bridge.handle("transcribe.stream.cancel") { [weak self] params, reply in
+            guard let self else { return }
+            let parameters = StreamParameters(params)
+            Task {
+                do {
+                    let (id, connectionID, clientId) = try Self.streamIdentity(parameters)
+                    try await self.streamingSessions.cancel(id: id, connectionID: connectionID, clientId: clientId)
+                    reply(["sessionId": id.uuidString, "cancelled": true], nil)
+                } catch { reply(nil, error.localizedDescription) }
+            }
+        }
+
         bridge.handle("transcribe.sessionStatus") { [weak self] _, reply in
             guard let self else { return }
             if let session = self.sessions.status() {
@@ -1487,6 +1543,16 @@ public final class VoxRuntimeService: @unchecked Sendable {
         }
     }
 
+    private static func streamIdentity(_ params: StreamParameters) throws -> (UUID, String, String) {
+        guard let raw = params.sessionId, let id = UUID(uuidString: raw),
+              let connectionID = params.connectionID,
+              let clientId = params.clientId, !clientId.isEmpty else { throw StreamingASRError.invalidSession }
+        return (id, connectionID, clientId)
+    }
+    private static func codableDictionary<T: Encodable>(_ value: T) throws -> [String: Any] {
+        try JSONSerialization.jsonObject(with: JSONEncoder().encode(value)) as? [String: Any] ?? [:]
+    }
+
     private func ensureMicrophoneAccessForLiveSession() async throws {
         let status = await MicrophonePermission.requestAccessStatusString()
         switch status {
@@ -1623,4 +1689,21 @@ struct ASRRouteTranscriptionResult: Sendable {
 struct AnnotationRouteResult: Sendable {
     let output: AnnotationOutput
     let performanceSample: PerformanceSample
+}
+
+private struct StreamParameters: Sendable {
+    let sessionId: String?
+    let connectionID: String?
+    let clientId: String?
+    let modelId: String?
+    let sequence: Int?
+    let audioBase64: String?
+    init(_ params: [String: Any]?) {
+        sessionId = params?["sessionId"] as? String
+        connectionID = params?["_connectionID"] as? String
+        clientId = params?["clientId"] as? String
+        modelId = params?["modelId"] as? String
+        sequence = params?["sequence"] as? Int
+        audioBase64 = params?["audioBase64"] as? String
+    }
 }

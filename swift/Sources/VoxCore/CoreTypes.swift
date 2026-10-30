@@ -126,14 +126,16 @@ public struct ASRModelInfo: Codable, Sendable, Equatable {
     public let installed: Bool
     public let preloaded: Bool
     public let available: Bool
+    public let computePlacement: CoreMLPlacement?
 
-    public init(id: String, name: String, backend: String, installed: Bool, preloaded: Bool, available: Bool) {
+    public init(id: String, name: String, backend: String, installed: Bool, preloaded: Bool, available: Bool, computePlacement: CoreMLPlacement? = nil) {
         self.id = id
         self.name = name
         self.backend = backend
         self.installed = installed
         self.preloaded = preloaded
         self.available = available
+        self.computePlacement = computePlacement
     }
 
     public func dictionaryValue() -> [String: Any] {
@@ -143,7 +145,8 @@ public struct ASRModelInfo: Codable, Sendable, Equatable {
             "backend": backend,
             "installed": installed,
             "preloaded": preloaded,
-            "available": available
+            "available": available,
+            "computePlacement": computePlacement?.dictionaryValue() ?? NSNull()
         ]
     }
 }

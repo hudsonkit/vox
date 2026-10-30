@@ -164,7 +164,7 @@ Do not hide warm-up behind app launch side effects. Warm on intent at a predicta
 
 ## Telemetry
 
-Companion mode records telemetry automatically. In embed mode, `VoxDictation` records a sample for every transcription (pass `recordsPerformance: false` to opt out). The lower-level types do not.
+Companion mode records telemetry automatically. In embed mode, `VoxDictation` records a sample for every transcription (pass `recordsPerformance: false` to opt out). `NativeStreamingASR.finish` also records its session, preserving clientId, route, and modelId; pass `recordPerformance: false` when the caller records it. The lower-level file engines do not.
 
 When you call `EngineManager` or `TTSEngineManager` directly, record samples yourself with `PerformanceRecorder` and preserve these dimensions:
 
@@ -186,7 +186,7 @@ Use the same route names Vox Companion uses:
 
 ## OpenAI TTS in embed mode
 
-- ASR: `EngineManager()` -> `ParakeetProvider()`
+- ASR: `EngineManager()` -> `NativeASRProvider()` (batch Parakeet plus explicit streaming models)
 - TTS: `TTSEngineManager()` registers every built-in provider: OpenAI, ElevenLabs, MiniMax, NVIDIA, Groq, Gemini and AVSpeech. It routes by model id and never falls back from one provider to another.
 - default TTS model: `TTSDefaults.modelId` = `gpt-4o-mini-tts`, which needs an OpenAI key
 - local TTS model: `TTSDefaults.localModelId` = `avspeech:system`, on device, no key
@@ -232,7 +232,7 @@ For a new Apple app integration, the default plan is:
 
 - `VoxDictation` covers dictation only. `VoxAppleSpeech` is optional playback, separate from it.
 - `VoxDictation.start()` is macOS only; on iOS it throws.
-- There is no public embed live-session coordinator yet: no partial text while recording.
+- `VoxDictation` still records then transcribes. Use `NativeStreamingASR.shared` with app-captured PCM for model-backed partials.
 - There is no public embed warm-up coordinator helper.
 - `EngineManager` and `TTSEngineManager` do not write performance samples; only `VoxDictation` does.
 - Apple apps do not need `@voxd/sdk` or `@voxd/client`.
@@ -257,3 +257,34 @@ Xcode copies SwiftPM resource bundles into the app for you. If you package the a
 `SpeechEngineResources` resolves the model catalog and mlx-audio provider script
 from that location in apps, and from SwiftPM resources in command-line builds.
 A packaged app does not fall back to a developer build directory.
+
+## App-captured streaming ASR
+
+Use `NativeStreamingASR.shared` when the app needs partial transcripts before capture stops. This API requires Apple Silicon and macOS 14.4 or iOS 17.4, so Core ML placement can be verified. The app supplies finite mono 16 kHz float32 PCM; use platform audio conversion, not a custom resampler.
+
+```swift
+import VoxCore
+import VoxEngine
+
+let asr = NativeStreamingASR.shared
+let modelId = StreamingASRDefaults.modelId
+// Explicit user-initiated warmup, not an app-launch side effect.
+_ = try await asr.preload(modelId: modelId, progress: { progress in
+    print(progress.status)
+})
+let sessionId = try await asr.begin(clientId: "my-app", modelId: modelId)
+// Feed 1–16000 samples per call; await each call before sending the next packet.
+let updates = try await asr.append(
+    sessionId: sessionId, clientId: "my-app", samples: capturedSamples
+)
+for update in updates { print(update.text, update.endOfUtterance) }
+let final = try await asr.finish(sessionId: sessionId, clientId: "my-app")
+print(final.text, final.words)
+// On interruption/error, call cancel instead of finish. It discards pending audio and text.
+```
+
+`preload(modelId:directory:language:progress:)` can use an explicitly supplied offline model bundle. Without a directory, preload installs missing assets. Installation alone is available through `install(modelId:progress:)` and does not instantiate models. Warmups for the same model join one flight. Start requires a ready model and never performs warmup.
+
+The runtime has one active owner and one loaded native ASR model per process. Batch Parakeet and streaming share that residency slot. Idle unload defaults to 60 seconds; call `setIdleUnload(seconds:)` to configure it. Call `status()` to inspect the loaded model, planned encoder device assignment, and owner. Word timings are approximate RNNT emission frames. See [Native PCM streaming](./runtime.md#native-pcm-streaming) for endpoint semantics and lifecycle limits.
+
+For several app processes, deliberately use one `VoxRuntimeService` host or `voxd` over the authenticated private Unix transport. Each app sends PCM using the `transcribe.stream.*` routes. Do not embed a separate model in every app when the product intends shared residency.
