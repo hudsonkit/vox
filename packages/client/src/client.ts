@@ -127,8 +127,9 @@ export class VoxClient {
     return parseCatalog(result);
   }
 
-  async listVoices(modelId?: string): Promise<VoiceInfo[]> {
-    const result = await this.call("synthesize.voices", modelId ? { modelId } : undefined);
+  async listVoices(modelId?: string, credentials?: SynthesisOptions["credentials"]): Promise<VoiceInfo[]> {
+    const params = credentials ? { modelId, credentials } : modelId ? { modelId } : undefined;
+    const result = await this.call("synthesize.voices", params);
     return (result.voices as VoiceInfo[]) ?? [];
   }
 

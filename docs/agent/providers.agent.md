@@ -13,7 +13,7 @@
 - NVIDIA Magpie: model `magpie-tts-multilingual`, `NV_API_KEY`/`NVIDIA_API_KEY`, LINEAR_PCM 44.1 kHz, dynamic `list_voices`, reject >2000 chars
 - Groq Orpheus: WAV `response_format`, 200-character limit, `GROQ_API_KEY`, require structurally valid WAV
 - Gemini TTS: Generate Content AUDIO for 2.5 and `gemini-3.1-flash-tts-preview`, wrap `audio/L16` as WAV, `GEMINI_API_KEY`/`GOOGLE_API_KEY`, voice `Rasalgethi`
-- per-request `credentials` allowlist: OpenAI, NVIDIA, Groq, Gemini/Google only; never ElevenLabs/MiniMax; never log keys
+- per-request `credentials` allowlist: OpenAI, ElevenLabs, NVIDIA, Groq, Gemini/Google; never MiniMax; never log keys
 - explicit empty/whitespace provider env key or alias fences process credential fallback for resolution and default model selection; process env is used only when that key is absent from `env`
 - NVIDIA Magpie, Groq, and Gemini synthesis HTTP errors redact the exact request text; JSON diagnostics keep secret redaction; plain-text bodies fail closed whenever synthesis sensitive values are supplied; voice discovery has no prompt; older providers keep their existing error surfaces
 - remote providers participate in defaults only when configured; aliases such as `magpie`/`groq-tts`/`google-tts` block canonical default overwrite
@@ -47,3 +47,8 @@
 - model adapters use platform/provider audio conversion; never add hand-written resampling or denoising
 - remote OpenAI ASR: `gpt-transcribe`, `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, `whisper-1`
 - override catalog URL with `VOX_MODEL_CATALOG_URL`
+
+- ElevenLabs: scoped credentials.ELEVENLABS_API_KEY (elevenlabsApiKey / elevenlabs_api_key aliases) for synthesis and RPC voices with explicit modelId; request-local key wins, never mutates config/env/credential store or subsequent requests. OpenAI static voices also support scoped keys; other unsupported scoped voice providers error.
+- ElevenLabs uses an ephemeral no-cache/cookie/credential-storage session by default and no-store requests. HTTP errors return status only, no vendor body; non-WAV success bodies rejected. Default output_format=wav_44100, not invalid wav_44100_128; account tier gates apply, no automatic fallback. Inventories reflect configured keys, not borrowed keys. Browser HTTP voice-list route does not accept credentials in URLs.
+
+- Scoped voice credentials forwarding is verified for bundled voxttsd; third-party external adapters must honor that protocol themselves. Lend only the selected provider key, not a whole credential store.

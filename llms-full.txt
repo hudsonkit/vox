@@ -997,6 +997,25 @@ Longer-running output flows use:
 - `synthesize.sessionStatus`
 - `synthesize.cancel`
 
+### Scoped ElevenLabs generation and voices
+
+Send an explicit `modelId`, `voiceId` and `credentials: { "ELEVENLABS_API_KEY": key }`
+to `synthesize.generate` or `synthesize.startSession`. The key belongs to that
+request. It is not stored in provider configuration, the process environment,
+history or credential files. Request keys override configured keys; an invalid
+selected key fails instead of retrying another account.
+
+`synthesize.voices` accepts the same credentials with an explicit ElevenLabs
+`modelId`, so account-specific voices use the selected account. OpenAI's static
+voice list also accepts scoped credentials. Unsupported built-in scoped voice discovery
+returns an error instead of silently using daemon credentials. Do not place keys
+in voice-list HTTP query strings; this is a companion RPC capability.
+
+Swift `VoxClient` callers use `call(_:params:timeout:onProgress:)` with these JSON
+parameters. No inference-engine linkage is required. TTS inventories describe
+daemon-configured availability; supplying a key does not change global defaults
+or inventory. See [provider rules and output-format requirements](./providers.md).
+
 ## RPC Routes
 
 The runtime exposes these RPC routes:
@@ -1548,9 +1567,13 @@ Notes:
 - Vox supports Apple Silicon only. Do not treat successful remote-provider compilation on an Intel host as a supported configuration.
 - Register ASR and TTS as separate entries even when they share the same `id`.
 - `models` is optional for external providers now. Vox can call `models()` and route dynamically from the returned list.
-- OpenAI, NVIDIA Magpie, Groq, and Gemini/Google accept per-request `credentials` on `synthesize.generate` / companion synthesis. Those keys are allowlisted through `VoxRuntimeService` and `VoxBridge`; unknown keys, including ElevenLabs and MiniMax keys, are dropped. ElevenLabs and MiniMax currently read only provider `env` and the process environment.
+- OpenAI, ElevenLabs, NVIDIA Magpie, Groq, and Gemini/Google accept per-request `credentials` on `synthesize.generate` / companion synthesis. Those keys are allowlisted through `VoxRuntimeService` and `VoxBridge`; unknown keys, including MiniMax keys, are dropped. MiniMax currently reads only provider `env` and the process environment.
 - Credential order for the providers that accept lent keys is per-request `credentials`, then provider `env`, then the process environment. An explicit provider `env` key or alias, even empty or whitespace, fences process fallback for both configured credential resolution and default model selection so a host can lend keys per request without inheriting an ambient secret. Process env is consulted only when no relevant credential key is present in provider `env` (including when `env` is omitted). Values are never logged or stored by the allowlist parser.
-- NVIDIA Magpie, Groq, and Gemini synthesis HTTP errors redact the exact request text before a vendor body can be persisted or logged. JSON diagnostics keep useful vendor detail after secret and exact-prompt redaction. Plain-text non-JSON bodies fail closed whenever synthesis sensitive values (prompt or instructions) are supplied, including distinctive fragments such as `quota: ` plus a short prompt prefix. Voice discovery has no prompt and is not covered by that fail-closed path. This sanitization applies to these new remote providers; OpenAI, ElevenLabs, MiniMax, and AVSpeech keep their existing error surfaces.
+- NVIDIA Magpie, Groq, and Gemini synthesis HTTP errors redact the exact request text before a vendor body can be persisted or logged. JSON diagnostics keep useful vendor detail after secret and exact-prompt redaction. Plain-text non-JSON bodies fail closed whenever synthesis sensitive values (prompt or instructions) are supplied, including distinctive fragments such as `quota: ` plus a short prompt prefix. Voice discovery has no prompt and is not covered by that fail-closed path. This sanitization applies to these new remote providers; OpenAI, MiniMax, and AVSpeech keep their existing error surfaces. ElevenLabs HTTP failures expose only the status code, never a vendor body that could echo a credential or text.
+- ElevenLabs accepts `credentials.ELEVENLABS_API_KEY` (`elevenlabsApiKey` / `elevenlabs_api_key` aliases) for synthesis and RPC voice discovery. Voice discovery with credentials requires an explicit `modelId`; unsupported built-in providers return an error instead of ignoring the key. OpenAI's static voice catalog also accepts scoped credentials. The browser HTTP voice-list route does not accept keys in a URL.
+- External adapters receive scoped voice credentials through the provider protocol and must honor that contract. This change verifies the bundled `voxttsd` path, not arbitrary third-party adapter implementations. Lend only the selected provider's key, not an entire credential store.
+- A lent ElevenLabs key is a request-local value. It does not change provider configuration, process environment, credentials files, model availability, or another client's account. Defaults use an ephemeral URLSession without disk/cache/cookie/credential storage; requests carry `Cache-Control: no-store`. Custom injected sessions are owned by the embed caller. No global key is needed for an explicitly selected ElevenLabs model with a lent key. Availability inventories describe daemon-configured credentials, not a previously borrowed key.
+- ElevenLabs WAV output defaults to `wav_44100`, correcting the invalid legacy `wav_44100_128` value. The [official API format list](https://elevenlabs.io/docs/api-reference/text-to-speech/convert) supports `wav_44100`; 44.1 kHz WAV requires the applicable account tier. Set `ELEVENLABS_OUTPUT_FORMAT` explicitly for another supported WAV rate. There is no silent tier/model/provider fallback. Invalid non-WAV success bodies are rejected before becoming audio output.
 - `ELEVENLABS_BASE_URL`, `ELEVENLABS_OUTPUT_FORMAT`, `MINIMAX_BASE_URL`, `NVIDIA_TTS_URL`, `NVIDIA_VOICES_URL`, `GROQ_BASE_URL`, and `GEMINI_BASE_URL` can override vendor defaults.
 - NVIDIA Magpie accepts `NV_API_KEY` and the `NVIDIA_API_KEY` compatibility alias, plus camelCase / snake_case variants. Gemini accepts `GEMINI_API_KEY`, `GOOGLE_API_KEY`, and `GOOGLE_GENAI_API_KEY`.
 - Remote providers are considered for default model selection and in-process default registration only when they are configured in `providers.json` or the daemon environment. An API key in the process environment is not broader user consent than selecting or configuring that provider. Configured aliases such as `magpie`, `groq-tts`, and `google-tts` prevent the canonical default entries from being appended over that family's routing and key config.
@@ -2078,7 +2101,7 @@ interface VoxClientSurface {
   listModels(): Promise<unknown>;
   listCatalog(): Promise<SpeechModelCatalog>;
   refreshCatalog(): Promise<SpeechModelCatalog>;
-  listVoices(modelId?: string): Promise<unknown>;
+  listVoices(modelId?: string, credentials?: SynthesisOptions["credentials"]): Promise<unknown>;
   installModel(modelId?: string): Promise<unknown>;
   preloadModel(modelId?: string): Promise<unknown>;
   getWarmupStatus(modelId?: string): Promise<unknown>;
@@ -2120,6 +2143,17 @@ interface SynthesisResult {
   speechTiming?: SpeechTiming;
 }
 ```
+
+## Scoped TTS credentials
+
+Synthesis accepts request-local OpenAI, ElevenLabs, NVIDIA, Groq and Gemini keys
+in `SynthesisOptions.credentials`. For example, send `ELEVENLABS_API_KEY` with an
+explicit ElevenLabs `modelId` and selected `voiceId`. The key is not installed in
+the daemon or reused for another request. Do not log options that contain keys.
+`listVoices(modelId, credentials)` supports selected-account ElevenLabs discovery
+and OpenAI's static catalog. An explicit model is required for scoped discovery;
+built-in providers that do not support it return an error rather than ignoring the key.
+See [provider credential rules](./providers.md).
 
 ## Error handling
 
@@ -3415,7 +3449,7 @@ Source: docs/agent/providers.agent.md
 - NVIDIA Magpie: model `magpie-tts-multilingual`, `NV_API_KEY`/`NVIDIA_API_KEY`, LINEAR_PCM 44.1 kHz, dynamic `list_voices`, reject >2000 chars
 - Groq Orpheus: WAV `response_format`, 200-character limit, `GROQ_API_KEY`, require structurally valid WAV
 - Gemini TTS: Generate Content AUDIO for 2.5 and `gemini-3.1-flash-tts-preview`, wrap `audio/L16` as WAV, `GEMINI_API_KEY`/`GOOGLE_API_KEY`, voice `Rasalgethi`
-- per-request `credentials` allowlist: OpenAI, NVIDIA, Groq, Gemini/Google only; never ElevenLabs/MiniMax; never log keys
+- per-request `credentials` allowlist: OpenAI, ElevenLabs, NVIDIA, Groq, Gemini/Google; never MiniMax; never log keys
 - explicit empty/whitespace provider env key or alias fences process credential fallback for resolution and default model selection; process env is used only when that key is absent from `env`
 - NVIDIA Magpie, Groq, and Gemini synthesis HTTP errors redact the exact request text; JSON diagnostics keep secret redaction; plain-text bodies fail closed whenever synthesis sensitive values are supplied; voice discovery has no prompt; older providers keep their existing error surfaces
 - remote providers participate in defaults only when configured; aliases such as `magpie`/`groq-tts`/`google-tts` block canonical default overwrite
@@ -3449,6 +3483,11 @@ Source: docs/agent/providers.agent.md
 - model adapters use platform/provider audio conversion; never add hand-written resampling or denoising
 - remote OpenAI ASR: `gpt-transcribe`, `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, `whisper-1`
 - override catalog URL with `VOX_MODEL_CATALOG_URL`
+
+- ElevenLabs: scoped credentials.ELEVENLABS_API_KEY (elevenlabsApiKey / elevenlabs_api_key aliases) for synthesis and RPC voices with explicit modelId; request-local key wins, never mutates config/env/credential store or subsequent requests. OpenAI static voices also support scoped keys; other unsupported scoped voice providers error.
+- ElevenLabs uses an ephemeral no-cache/cookie/credential-storage session by default and no-store requests. HTTP errors return status only, no vendor body; non-WAV success bodies rejected. Default output_format=wav_44100, not invalid wav_44100_128; account tier gates apply, no automatic fallback. Inventories reflect configured keys, not borrowed keys. Browser HTTP voice-list route does not accept credentials in URLs.
+
+- Scoped voice credentials forwarding is verified for bundled voxttsd; third-party external adapters must honor that protocol themselves. Lend only the selected provider key, not a whole credential store.
 
 # Quickstart Facts
 
@@ -3538,6 +3577,8 @@ Source: docs/agent/runtime.agent.md
 - One private runtime publisher lease; publication failure stops new listener; stop removes only its own instance. Distinct test hosts need distinct VOX_RUNTIME_PATH.
 - RuntimeRegistry.read and health return metadata, never credentials. Never log raw capability JSON. TypeScript TCP discovery/CLI refuse private files rather than connecting/launching another TCP daemon; private TS transport is not implemented.
 
+- Scoped ElevenLabs credentials.ELEVENLABS_API_KEY supported for synthesize.generate/startSession and voices with explicit modelId, through in-process or bundled voxttsd. No mutation/persistence of lent key, no retry against another account; inventory stays configured-only. OpenAI static voices also accept scoped keys; unsupported scoped voice providers error. Never send keys via voice-list query URLs. Swift VoxClient uses generic call, no engine dependency.
+
 # SDK Facts
 
 Source: docs/agent/sdk.agent.md
@@ -3559,10 +3600,12 @@ Source: docs/agent/sdk.agent.md
 - annotation method exposed: `annotateFile`
 - live session method exposed: `createLiveSession`; it returns `VoxLiveSession` synchronously
 - synthesis can return optional `speechTiming`; read the types in `packages/client/src/types.ts` before duplicating shapes
-- per-request `credentials` are allowlisted for OpenAI, NVIDIA Magpie, Groq, and Gemini/Google only
+- per-request `credentials` are allowlisted for OpenAI, ElevenLabs, NVIDIA Magpie, Groq, and Gemini/Google
 
 - Native PCM: preloadModel explicitly, startPCMStream(modelId), appendPCMStream(sessionId,sequence,Float32Array) -> nextSequence+updates, finishPCMStream -> final update, cancelPCMStream -> discard, nativeStreamingStatus.
 - 1–16000 finite mono 16 kHz samples; await each packet acknowledgement; no uncertain retries; cumulative text + approximate word timestamps + endpointSource.
+
+- listVoices(modelId, credentials?) forwards selected-account credentials on that call only; explicit model required with keys. ElevenLabs dynamic voices and OpenAI static catalog support this; other unsupported providers error. Never log credentials; inventory availability stays daemon-configured, not borrowed-account state.
 
 # Operations Facts
 

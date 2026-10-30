@@ -50,7 +50,7 @@ interface VoxClientSurface {
   listModels(): Promise<unknown>;
   listCatalog(): Promise<SpeechModelCatalog>;
   refreshCatalog(): Promise<SpeechModelCatalog>;
-  listVoices(modelId?: string): Promise<unknown>;
+  listVoices(modelId?: string, credentials?: SynthesisOptions["credentials"]): Promise<unknown>;
   installModel(modelId?: string): Promise<unknown>;
   preloadModel(modelId?: string): Promise<unknown>;
   getWarmupStatus(modelId?: string): Promise<unknown>;
@@ -92,6 +92,17 @@ interface SynthesisResult {
   speechTiming?: SpeechTiming;
 }
 ```
+
+## Scoped TTS credentials
+
+Synthesis accepts request-local OpenAI, ElevenLabs, NVIDIA, Groq and Gemini keys
+in `SynthesisOptions.credentials`. For example, send `ELEVENLABS_API_KEY` with an
+explicit ElevenLabs `modelId` and selected `voiceId`. The key is not installed in
+the daemon or reused for another request. Do not log options that contain keys.
+`listVoices(modelId, credentials)` supports selected-account ElevenLabs discovery
+and OpenAI's static catalog. An explicit model is required for scoped discovery;
+built-in providers that do not support it return an error rather than ignoring the key.
+See [provider credential rules](./providers.md).
 
 ## Error handling
 

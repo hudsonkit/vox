@@ -12,7 +12,7 @@ public actor ElevenLabsTTSProvider: TTSProvider {
     public static let defaultVoiceID = "JBFqnCBsd6RMkjVDRZzb"
 
     private static let defaultBaseURL = "https://api.elevenlabs.io"
-    private static let defaultOutputFormat = "wav_44100_128"
+    private static let defaultOutputFormat = "wav_44100"
 
     private let log = VoxLog.engine
     private let session: URLSession
@@ -21,10 +21,14 @@ public actor ElevenLabsTTSProvider: TTSProvider {
     private let outputFormat: String
     private var preloadedModels: Set<String> = []
 
-    public init(env: [String: String]? = nil, session: URLSession = .shared) {
-        self.session = session
-        self.apiKey = env?["ELEVENLABS_API_KEY"]
-            ?? ProcessInfo.processInfo.environment["ELEVENLABS_API_KEY"]
+    public init(env: [String: String]? = nil, session: URLSession? = nil) {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.urlCache = nil
+        configuration.urlCredentialStorage = nil
+        configuration.httpCookieStorage = nil
+        self.session = session ?? URLSession(configuration: configuration)
+        self.apiKey = Self.resolveAPIKey(providerCredentials: [:], env: env,
+                                         processEnv: ProcessInfo.processInfo.environment)
         let rawBaseURL = env?["ELEVENLABS_BASE_URL"]
             ?? ProcessInfo.processInfo.environment["ELEVENLABS_BASE_URL"]
             ?? Self.defaultBaseURL
@@ -49,10 +53,14 @@ public actor ElevenLabsTTSProvider: TTSProvider {
     }
 
     public func voices(modelId: String?) async throws -> [TTSVoiceInfo] {
+        try await voices(modelId: modelId, providerCredentials: [:])
+    }
+
+    public func voices(modelId: String?, providerCredentials: [String: String]) async throws -> [TTSVoiceInfo] {
         let resolvedModelId = modelId ?? Self.supportedModelIDs[0]
         try validate(modelId: resolvedModelId)
 
-        guard apiKeyAvailability() else {
+        guard resolvedAPIKey(providerCredentials: providerCredentials) != nil else {
             return [
                 TTSVoiceInfo(
                     id: Self.defaultVoiceID,
@@ -79,10 +87,13 @@ public actor ElevenLabsTTSProvider: TTSProvider {
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        request.setValue(try resolveAPIKey(), forHTTPHeaderField: "xi-api-key")
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.httpShouldHandleCookies = false
+        request.setValue("no-store", forHTTPHeaderField: "Cache-Control")
+        request.setValue(try resolveAPIKey(providerCredentials: providerCredentials), forHTTPHeaderField: "xi-api-key")
 
-        let (data, response) = try await session.data(for: request)
-        try validateHTTPResponse(data: data, response: response)
+        let (data, response) = try await RemoteTTSSupport.data(for: request, session: session)
+        try validateHTTPResponse(response: response)
 
         guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let voices = object["voices"] as? [[String: Any]] else {
@@ -157,7 +168,7 @@ public actor ElevenLabsTTSProvider: TTSProvider {
         let trace = TranscriptionTrace()
 
         trace.begin("model_check")
-        let apiKey = try resolveAPIKey()
+        let apiKey = try resolveAPIKey(providerCredentials: request.providerCredentials)
         let wasPreloaded = preloadedModels.contains(request.modelId)
         trace.end(wasPreloaded ? "ready" : "cold")
 
@@ -185,6 +196,9 @@ public actor ElevenLabsTTSProvider: TTSProvider {
 
         var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = "POST"
+        urlRequest.cachePolicy = .reloadIgnoringLocalCacheData
+        urlRequest.httpShouldHandleCookies = false
+        urlRequest.setValue("no-store", forHTTPHeaderField: "Cache-Control")
         urlRequest.setValue(apiKey, forHTTPHeaderField: "xi-api-key")
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
@@ -198,11 +212,14 @@ public actor ElevenLabsTTSProvider: TTSProvider {
 
         urlRequest.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [])
 
-        let (data, response) = try await session.data(for: urlRequest)
-        let httpResponse = try validateHTTPResponse(data: data, response: response)
+        let (data, response) = try await RemoteTTSSupport.data(for: urlRequest, session: session)
+        let httpResponse = try validateHTTPResponse(response: response)
         let synthesisMs = trace.end("\(data.count) bytes")
 
-        let audioDurationMs = (try? inspectWaveData(data)) ?? 0
+        guard PCMWAV.isStructurallyValid(data) else {
+            throw ElevenLabsTTSProviderError.invalidResponse("synthesize audio (expected WAV)")
+        }
+        let audioDurationMs = try inspectWaveData(data)
         let metrics = SynthesisMetrics(
             traceId: trace.traceId,
             characterCount: request.text.count,
@@ -233,11 +250,29 @@ public actor ElevenLabsTTSProvider: TTSProvider {
         return !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    private func resolveAPIKey() throws -> String {
-        guard let apiKey, !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+    nonisolated static func resolveAPIKey(
+        providerCredentials: [String: String], env: [String: String]?, processEnv: [String: String]
+    ) -> String? {
+        RemoteTTSSupport.resolveSecret(
+            lentValues: [providerCredentials["ELEVENLABS_API_KEY"], providerCredentials["elevenlabsApiKey"],
+                         providerCredentials["elevenlabs_api_key"]],
+            env: env, processEnv: processEnv,
+            keys: ["ELEVENLABS_API_KEY"])
+    }
+
+    private func resolvedAPIKey(providerCredentials: [String: String]) -> String? {
+        RemoteTTSSupport.firstNonEmpty(providerCredentials["ELEVENLABS_API_KEY"],
+            providerCredentials["elevenlabsApiKey"], providerCredentials["elevenlabs_api_key"], apiKey)
+    }
+
+    private func resolveAPIKey(providerCredentials: [String: String] = [:]) throws -> String {
+        guard let key = resolvedAPIKey(providerCredentials: providerCredentials) else {
             throw ElevenLabsTTSProviderError.missingAPIKey
         }
-        return apiKey
+        guard key.utf8.allSatisfy({ $0 >= 33 && $0 <= 126 }) else {
+            throw ElevenLabsTTSProviderError.invalidAPIKey
+        }
+        return key
     }
 
     private func validate(modelId: String) throws {
@@ -253,14 +288,14 @@ public actor ElevenLabsTTSProvider: TTSProvider {
     }
 
     @discardableResult
-    private func validateHTTPResponse(data: Data, response: URLResponse) throws -> HTTPURLResponse {
+    private func validateHTTPResponse(response: URLResponse) throws -> HTTPURLResponse {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw ElevenLabsTTSProviderError.nonHTTPResponse
         }
 
         guard (200..<300).contains(httpResponse.statusCode) else {
-            let message = String(data: data, encoding: .utf8) ?? "HTTP \(httpResponse.statusCode)"
-            throw ElevenLabsTTSProviderError.requestFailed(message)
+            // A vendor body can echo credentials or user text. Never propagate it to logs/history.
+            throw ElevenLabsTTSProviderError.requestFailed("HTTP \(httpResponse.statusCode)")
         }
 
         return httpResponse
@@ -281,6 +316,7 @@ public actor ElevenLabsTTSProvider: TTSProvider {
 public enum ElevenLabsTTSProviderError: Error, LocalizedError {
     case missingText
     case missingAPIKey
+    case invalidAPIKey
     case unsupportedModel(String)
     case unsupportedFormat(String)
     case invalidURL
@@ -294,6 +330,8 @@ public enum ElevenLabsTTSProviderError: Error, LocalizedError {
             return "Missing text"
         case .missingAPIKey:
             return "Missing ELEVENLABS_API_KEY for ElevenLabs TTS provider."
+        case .invalidAPIKey:
+            return "Invalid ElevenLabs API key header value."
         case .unsupportedModel(let modelId):
             return "Unsupported ElevenLabs TTS model: \(modelId)"
         case .unsupportedFormat(let format):

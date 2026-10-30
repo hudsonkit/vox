@@ -124,7 +124,8 @@ public final class VoxRuntimeService: @unchecked Sendable {
     }
 
     func performSynthesizeVoices(params: [String: Any]?) async throws -> [TTSVoiceInfo] {
-        try await performSynthesizeVoices(modelId: params?["modelId"] as? String)
+        try await performSynthesizeVoices(modelId: params?["modelId"] as? String,
+            providerCredentials: providerCredentials(from: params))
     }
 
     func performSynthesizeModels() async -> [TTSModelInfo] {
@@ -322,8 +323,9 @@ public final class VoxRuntimeService: @unchecked Sendable {
         )
     }
 
-    private func performSynthesizeVoices(modelId: String?) async throws -> [TTSVoiceInfo] {
-        try await ttsEngine.voices(modelId: modelId)
+    private func performSynthesizeVoices(modelId: String?, providerCredentials: [String: String] = [:]) async throws -> [TTSVoiceInfo] {
+        guard providerCredentials.isEmpty || modelId != nil else { throw TTSVoiceCredentialsError.modelRequired }
+        return try await ttsEngine.voices(modelId: modelId, providerCredentials: providerCredentials)
     }
 
     private func currentPreferences() -> VoxPreferences {
@@ -1008,9 +1010,11 @@ public final class VoxRuntimeService: @unchecked Sendable {
         bridge.handle("synthesize.voices") { [weak self] params, reply in
             guard let self else { return }
             let modelId = params?["modelId"] as? String
+            let credentials = self.providerCredentials(from: params)
             Task {
                 do {
-                    let voices = try await self.performSynthesizeVoices(modelId: modelId)
+                    let voices = try await self.performSynthesizeVoices(modelId: modelId,
+                        providerCredentials: credentials)
                     reply([
                         "voices": voices.map { $0.dictionaryValue() }
                     ], nil)

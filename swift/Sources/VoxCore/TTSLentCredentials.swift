@@ -2,11 +2,14 @@ import Foundation
 
 /// Allowlist for per-request TTS credential lending.
 ///
-/// Only OpenAI, NVIDIA Magpie, Groq, and Gemini/Google keys are forwarded
+/// Only OpenAI, ElevenLabs, NVIDIA Magpie, Groq, and Gemini/Google keys are forwarded
 /// through the companion RPC and HTTP bridge. Unknown keys are dropped and
 /// values are never logged by this parser.
 public enum TTSLentCredentials {
     public static let allowedKeys: Set<String> = [
+        "ELEVENLABS_API_KEY",
+        "elevenlabsApiKey",
+        "elevenlabs_api_key",
         "OPENAI_API_KEY",
         "openaiApiKey",
         "openai_api_key",

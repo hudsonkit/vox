@@ -113,12 +113,30 @@ public struct SynthesisRequest: Sendable, Equatable {
 public protocol TTSProvider: Sendable {
     func models() async -> [TTSModelInfo]
     func voices(modelId: String?) async throws -> [TTSVoiceInfo]
+    func voices(modelId: String?, providerCredentials: [String: String]) async throws -> [TTSVoiceInfo]
     func preload(
         modelId: String,
         voiceId: String?,
         progress: @escaping @Sendable (ModelProgress) -> Void
     ) async throws -> TTSModelInfo
     func synthesize(_ request: SynthesisRequest) async throws -> SynthesisOutput
+}
+
+public enum TTSVoiceCredentialsError: Error, LocalizedError, Sendable {
+    case unsupported, modelRequired
+    public var errorDescription: String? {
+        switch self {
+        case .unsupported: return "This provider does not support scoped credentials for voice discovery"
+        case .modelRequired: return "Scoped voice credentials require an explicit modelId"
+        }
+    }
+}
+
+extension TTSProvider {
+    public func voices(modelId: String?, providerCredentials: [String: String]) async throws -> [TTSVoiceInfo] {
+        guard providerCredentials.isEmpty else { throw TTSVoiceCredentialsError.unsupported }
+        return try await voices(modelId: modelId)
+    }
 }
 
 public actor TTSEngineManager {
@@ -136,8 +154,8 @@ public actor TTSEngineManager {
         await provider.models()
     }
 
-    public func voices(modelId: String? = nil) async throws -> [TTSVoiceInfo] {
-        try await provider.voices(modelId: modelId)
+    public func voices(modelId: String? = nil, providerCredentials: [String: String] = [:]) async throws -> [TTSVoiceInfo] {
+        try await provider.voices(modelId: modelId, providerCredentials: providerCredentials)
     }
 
     public func preload(

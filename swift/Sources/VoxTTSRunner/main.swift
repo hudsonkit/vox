@@ -47,7 +47,8 @@ struct VoxTTSRunner {
             return ["models": models.map { $0.dictionaryValue() }]
 
         case "voices":
-            let voices = try await engine.voices(modelId: request.params["modelId"] as? String)
+            let voices = try await engine.voices(modelId: request.params["modelId"] as? String,
+                providerCredentials: providerCredentials(from: request.params))
             return ["voices": voices.map { $0.dictionaryValue() }]
 
         case "preload":

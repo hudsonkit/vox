@@ -44,11 +44,17 @@ public actor ExternalTTSProvider: TTSProvider {
     }
 
     public func voices(modelId: String?) async throws -> [TTSVoiceInfo] {
+        try await voices(modelId: modelId, providerCredentials: [:])
+    }
+
+    public func voices(modelId: String?, providerCredentials: [String: String]) async throws -> [TTSVoiceInfo] {
         let transport = try ensureRunning()
         var params: [String: Any] = [:]
         if let modelId {
             params["modelId"] = modelId
         }
+
+        if !providerCredentials.isEmpty { params["credentials"] = providerCredentials }
 
         let result = if params.isEmpty {
             try await transport.call(method: "voices")

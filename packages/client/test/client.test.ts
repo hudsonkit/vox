@@ -2,6 +2,19 @@ import { VoxClient } from "../src/client.ts";
 import { STREAM_TIMEOUT_MS } from "../src/constants.ts";
 
 describe("VoxClient", () => {
+  it("forwards selected-account voice credentials only on that call", async () => {
+    const client = new VoxClient({ clientId: "talkie" });
+    const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
+    (client as any).transport = { call: async (method: string, params: Record<string, unknown>) => {
+      calls.push({ method, params }); return { voices: [] };
+    } };
+    await client.listVoices("eleven_multilingual_v2", { ELEVENLABS_API_KEY: "selected-account-test-key" });
+    await client.listVoices("eleven_multilingual_v2");
+    expect(calls[0]).toEqual({ method: "synthesize.voices", params: { clientId: "talkie",
+      modelId: "eleven_multilingual_v2", credentials: { ELEVENLABS_API_KEY: "selected-account-test-key" } } });
+    expect(calls[1]?.params.credentials).toBeUndefined();
+  });
+
   it("uses the streaming timeout budget for file transcription", async () => {
     const calls: Array<{ method: string; params: Record<string, unknown>; timeoutMs: number }> = [];
     const client = new VoxClient({ clientId: "test-client" }) as unknown as {

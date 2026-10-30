@@ -103,6 +103,13 @@ public actor TTSProviderRegistry: TTSProvider {
         }
     }
 
+    public func voices(modelId: String?, providerCredentials: [String: String]) async throws -> [TTSVoiceInfo] {
+        guard !providerCredentials.isEmpty else { return try await voices(modelId: modelId) }
+        guard let modelId else { throw TTSVoiceCredentialsError.modelRequired }
+        let provider = try await resolveProvider(for: modelId)
+        return try await provider.voices(modelId: modelId, providerCredentials: providerCredentials)
+    }
+
     public func voices(modelId: String?) async throws -> [TTSVoiceInfo] {
         if let modelId {
             let provider = try await resolveProvider(for: modelId)

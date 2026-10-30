@@ -66,6 +66,25 @@ Longer-running output flows use:
 - `synthesize.sessionStatus`
 - `synthesize.cancel`
 
+### Scoped ElevenLabs generation and voices
+
+Send an explicit `modelId`, `voiceId` and `credentials: { "ELEVENLABS_API_KEY": key }`
+to `synthesize.generate` or `synthesize.startSession`. The key belongs to that
+request. It is not stored in provider configuration, the process environment,
+history or credential files. Request keys override configured keys; an invalid
+selected key fails instead of retrying another account.
+
+`synthesize.voices` accepts the same credentials with an explicit ElevenLabs
+`modelId`, so account-specific voices use the selected account. OpenAI's static
+voice list also accepts scoped credentials. Unsupported built-in scoped voice discovery
+returns an error instead of silently using daemon credentials. Do not place keys
+in voice-list HTTP query strings; this is a companion RPC capability.
+
+Swift `VoxClient` callers use `call(_:params:timeout:onProgress:)` with these JSON
+parameters. No inference-engine linkage is required. TTS inventories describe
+daemon-configured availability; supplying a key does not change global defaults
+or inventory. See [provider rules and output-format requirements](./providers.md).
+
 ## RPC Routes
 
 The runtime exposes these RPC routes:

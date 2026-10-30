@@ -72,6 +72,14 @@ public actor OpenAITTSProvider: TTSProvider {
         }
     }
 
+    public func voices(modelId: String?, providerCredentials: [String: String]) async throws -> [TTSVoiceInfo] {
+        let voices = try await voices(modelId: modelId)
+        guard RemoteTTSSupport.firstNonEmpty(providerCredentials["OPENAI_API_KEY"],
+            providerCredentials["openaiApiKey"], providerCredentials["openai_api_key"]) != nil else { return voices }
+        return voices.map { TTSVoiceInfo(id: $0.id, name: $0.name, language: $0.language,
+            backend: $0.backend, modelId: $0.modelId, available: true, isDefault: $0.isDefault) }
+    }
+
     public func preload(
         modelId: String,
         voiceId: String?,

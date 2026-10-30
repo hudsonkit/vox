@@ -5,6 +5,118 @@ import VoxCore
 
 @Suite("Remote TTS providers", .serialized)
 struct RemoteTTSProviderTests {
+    @Test("ElevenLabs request credentials win and explicit provider env fences ambient keys")
+    func elevenCredentialPrecedenceAndIsolation() async throws {
+        #expect(ElevenLabsTTSProvider.resolveAPIKey(providerCredentials: ["ELEVENLABS_API_KEY": " lent "],
+            env: ["ELEVENLABS_API_KEY": "configured"], processEnv: ["ELEVENLABS_API_KEY": "ambient"]) == "lent")
+        #expect(ElevenLabsTTSProvider.resolveAPIKey(providerCredentials: ["elevenlabs_api_key": " alias "],
+            env: ["ELEVENLABS_API_KEY": ""], processEnv: ["ELEVENLABS_API_KEY": "ambient"]) == "alias")
+        #expect(ElevenLabsTTSProvider.resolveAPIKey(providerCredentials: [:],
+            env: ["ELEVENLABS_API_KEY": " "], processEnv: ["ELEVENLABS_API_KEY": "ambient"]) == nil)
+        #expect(ElevenLabsTTSProvider.resolveAPIKey(providerCredentials: [:],
+            env: [:], processEnv: ["ELEVENLABS_API_KEY": " ambient "]) == "ambient")
+        let session = MockHTTPURLProtocol.session(body: try validWAV())
+        let provider = ElevenLabsTTSProvider(env: ["ELEVENLABS_API_KEY": ""], session: session)
+        for key in ["account-one-test-key", "account-two-test-key"] {
+            _ = try await provider.synthesize(SynthesisRequest(text: "Hello", modelId: "eleven_flash_v2_5",
+                voiceId: "selected-voice", speed: 1.1, providerCredentials: ["ELEVENLABS_API_KEY": key]))
+            #expect(MockHTTPURLProtocol.lastRequest?.value(forHTTPHeaderField: "xi-api-key") == key)
+            #expect(MockHTTPURLProtocol.lastRequest?.value(forHTTPHeaderField: "Cache-Control") == "no-store")
+            #expect(MockHTTPURLProtocol.lastRequest?.url?.path == "/v1/text-to-speech/selected-voice")
+            let query = URLComponents(url: try #require(MockHTTPURLProtocol.lastRequest?.url), resolvingAgainstBaseURL: false)?.queryItems
+            #expect(query?.first(where: { $0.name == "output_format" })?.value == "wav_44100")
+        }
+        await #expect(throws: ElevenLabsTTSProviderError.self) {
+            try await provider.synthesize(SynthesisRequest(text: "No borrowed key", modelId: "eleven_flash_v2_5"))
+        }
+        #expect(MockHTTPURLProtocol.requests.count == 2, "A borrowed key must not authorize a later request")
+        #expect(await provider.models().allSatisfy { !$0.available })
+    }
+
+    @Test("ElevenLabs scoped keys never overwrite configured credentials")
+    func elevenScopedKeyDoesNotReplaceConfiguredKey() async throws {
+        let session = MockHTTPURLProtocol.session(body: try validWAV())
+        let provider = ElevenLabsTTSProvider(env: ["ELEVENLABS_API_KEY": "configured-test-key"], session: session)
+        for credentials in [[:], ["elevenlabsApiKey": "selected-test-key"], [:]] {
+            _ = try await provider.synthesize(SynthesisRequest(text: "Hello", modelId: "eleven_multilingual_v2",
+                providerCredentials: credentials))
+        }
+        #expect(MockHTTPURLProtocol.requests.map { $0.value(forHTTPHeaderField: "xi-api-key") } ==
+                ["configured-test-key", "selected-test-key", "configured-test-key"])
+        async let first = provider.synthesize(SynthesisRequest(text: "account A", modelId: "eleven_multilingual_v2",
+            providerCredentials: ["ELEVENLABS_API_KEY": "account-a-test-key"]))
+        async let second = provider.synthesize(SynthesisRequest(text: "account B", modelId: "eleven_multilingual_v2",
+            providerCredentials: ["ELEVENLABS_API_KEY": "account-b-test-key"]))
+        _ = try await (first, second)
+        for (request, body) in zip(MockHTTPURLProtocol.requests.dropFirst(3), MockHTTPURLProtocol.bodies.dropFirst(3)) {
+            let object = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            let expected = object["text"] as? String == "account A" ? "account-a-test-key" : "account-b-test-key"
+            #expect(request.value(forHTTPHeaderField: "xi-api-key") == expected)
+        }
+        #expect(MockHTTPURLProtocol.requests.count == 5)
+
+    }
+
+    @Test("ElevenLabs voice discovery authenticates the selected account and does not retain it")
+    func elevenScopedVoiceDiscovery() async throws {
+        let body = Data(#"{"voices":[{"voice_id":"selected-voice","name":"Selected account voice"}]}"#.utf8)
+        let session = MockHTTPURLProtocol.session(body: body, contentType: "application/json")
+        let provider = ElevenLabsTTSProvider(env: ["ELEVENLABS_API_KEY": ""], session: session)
+        let manager = TTSEngineManager(provider: provider)
+        let voices = try await manager.voices(modelId: "eleven_multilingual_v2",
+            providerCredentials: ["ELEVENLABS_API_KEY": "selected-test-key"])
+        #expect(voices.first?.id == "selected-voice")
+        #expect(voices.first?.available == true)
+        #expect(MockHTTPURLProtocol.lastRequest?.value(forHTTPHeaderField: "xi-api-key") == "selected-test-key")
+        #expect(MockHTTPURLProtocol.lastRequest?.url?.path == "/v2/voices")
+        let unconfigured = try await manager.voices(modelId: "eleven_multilingual_v2")
+        #expect(unconfigured.allSatisfy { !$0.available })
+        #expect(MockHTTPURLProtocol.requests.count == 1)
+    }
+
+    @Test("ElevenLabs errors discard echoed secrets/text, reject header injection and preserve cancellation")
+    func elevenErrorsDoNotExposeCredentials() async throws {
+        let key = "selected-test-secret", text = "private synthetic utterance"
+        for message in ["{\"detail\":\"\(key) \(text)\"}", "echo \(key) \(text)"] {
+            let provider = ElevenLabsTTSProvider(env: ["ELEVENLABS_API_KEY": ""], session:
+                MockHTTPURLProtocol.session(body: Data(message.utf8), statusCode: 401))
+            do {
+                _ = try await provider.synthesize(SynthesisRequest(text: text, modelId: "eleven_multilingual_v2",
+                    providerCredentials: ["ELEVENLABS_API_KEY": key]))
+                Issue.record("Expected HTTP error")
+            } catch {
+                #expect(error.localizedDescription.contains("HTTP 401"))
+                #expect(!error.localizedDescription.contains(key))
+                #expect(!error.localizedDescription.contains(text))
+            }
+        }
+        let invalidAudio = ElevenLabsTTSProvider(env: ["ELEVENLABS_API_KEY": ""], session:
+            MockHTTPURLProtocol.session(body: Data("echo \(key) \(text)".utf8), statusCode: 200))
+        do {
+            _ = try await invalidAudio.synthesize(SynthesisRequest(text: text, modelId: "eleven_multilingual_v2",
+                providerCredentials: ["ELEVENLABS_API_KEY": key]))
+            Issue.record("Expected non-audio response rejection")
+        } catch { #expect(!error.localizedDescription.contains(key)); #expect(!error.localizedDescription.contains(text)) }
+        let provider = ElevenLabsTTSProvider(env: ["ELEVENLABS_API_KEY": ""], session: MockHTTPURLProtocol.session(body: try validWAV()))
+        await #expect(throws: ElevenLabsTTSProviderError.self) {
+            try await provider.synthesize(SynthesisRequest(text: text, modelId: "eleven_multilingual_v2",
+                providerCredentials: ["ELEVENLABS_API_KEY": "bad\r\nheader"]))
+        }
+        #expect(MockHTTPURLProtocol.requests.isEmpty)
+        await expectCancellation {
+            try await ElevenLabsTTSProvider(env: ["ELEVENLABS_API_KEY": ""], session: MockHTTPURLProtocol.session(error: URLError(.cancelled)))
+                .synthesize(SynthesisRequest(text: text, modelId: "eleven_multilingual_v2", providerCredentials: ["ELEVENLABS_API_KEY": key]))
+        }
+    }
+
+    @Test("Scoped voice credentials require an explicitly supported provider")
+    func voiceCredentialsAreNotSilentlyIgnored() async {
+        let manager = TTSEngineManager(provider: AVSpeechSynthesizerProvider())
+        await #expect(throws: TTSVoiceCredentialsError.self) {
+            try await manager.voices(modelId: "avspeech:system", providerCredentials: ["ELEVENLABS_API_KEY": "selected-test-key"])
+        }
+    }
+
     @Test("NVIDIA prefers NV_API_KEY while accepting NVIDIA_API_KEY and per-request credentials")
     func nvidiaCredentialPrecedence() {
         #expect(NVIDIAMagpieTTSProvider.resolveAPIKey(

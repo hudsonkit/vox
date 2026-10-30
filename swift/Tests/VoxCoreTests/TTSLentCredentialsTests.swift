@@ -3,7 +3,7 @@ import Testing
 @testable import VoxCore
 
 struct TTSLentCredentialsTests {
-    @Test("allowlist forwards OpenAI, NVIDIA, Groq, and Gemini aliases and drops everything else")
+    @Test("allowlist forwards OpenAI, ElevenLabs, NVIDIA, Groq, and Gemini aliases and drops everything else")
     func parsesAllowlistedKeysOnly() {
         let credentials = TTSLentCredentials.parse(from: [
             "credentials": [
@@ -13,7 +13,9 @@ struct TTSLentCredentialsTests {
                 "GROQ_API_KEY": " groq-key ",
                 "GOOGLE_GENAI_API_KEY": "google-alias",
                 "geminiApiKey": "gemini-camel",
-                "ELEVENLABS_API_KEY": "should-drop",
+                "ELEVENLABS_API_KEY": " eleven-lent ",
+                "elevenlabsApiKey": "camel",
+                "elevenlabs_api_key": "snake",
                 "MINIMAX_API_KEY": "should-drop",
                 "ignored": "not-forwarded"
             ]
@@ -25,7 +27,9 @@ struct TTSLentCredentialsTests {
         #expect(credentials["GROQ_API_KEY"] == "groq-key")
         #expect(credentials["GOOGLE_GENAI_API_KEY"] == "google-alias")
         #expect(credentials["geminiApiKey"] == "gemini-camel")
-        #expect(credentials["ELEVENLABS_API_KEY"] == nil)
+        #expect(credentials["ELEVENLABS_API_KEY"] == "eleven-lent")
+        #expect(credentials["elevenlabsApiKey"] == "camel")
+        #expect(credentials["elevenlabs_api_key"] == "snake")
         #expect(credentials["MINIMAX_API_KEY"] == nil)
         #expect(credentials["ignored"] == nil)
         #expect(!credentials.values.contains(where: { $0.contains("should-drop") }))

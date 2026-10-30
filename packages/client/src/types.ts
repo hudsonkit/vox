@@ -211,6 +211,9 @@ export interface SynthesisOptions {
   instructions?: string;
   speechTiming?: boolean | SpeechTimingRequest;
   credentials?: {
+    ELEVENLABS_API_KEY?: string;
+    elevenlabsApiKey?: string;
+    elevenlabs_api_key?: string;
     OPENAI_API_KEY?: string;
     openaiApiKey?: string;
     openai_api_key?: string;

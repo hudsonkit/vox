@@ -62,3 +62,5 @@
 - VoxEndpoint.discovered() / VoxDaemonClient.connectDiscovered(): explicit env endpoint+token pair wins; either present requires both nonempty; otherwise secure capability file. No missing/invalid/TCP fallback, no daemon launch.
 - One private runtime publisher lease; publication failure stops new listener; stop removes only its own instance. Distinct test hosts need distinct VOX_RUNTIME_PATH.
 - RuntimeRegistry.read and health return metadata, never credentials. Never log raw capability JSON. TypeScript TCP discovery/CLI refuse private files rather than connecting/launching another TCP daemon; private TS transport is not implemented.
+
+- Scoped ElevenLabs credentials.ELEVENLABS_API_KEY supported for synthesize.generate/startSession and voices with explicit modelId, through in-process or bundled voxttsd. No mutation/persistence of lent key, no retry against another account; inventory stays configured-only. OpenAI static voices also accept scoped keys; unsupported scoped voice providers error. Never send keys via voice-list query URLs. Swift VoxClient uses generic call, no engine dependency.
