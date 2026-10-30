@@ -114,6 +114,10 @@ final class StreamingCoreMLPipeline: StreamingPipeline, @unchecked Sendable {
   }
 
   func reset() throws {
+    try autoreleasepool { try resetCaches() }
+  }
+
+  private func resetCaches() throws {
     encoderState.removeAll()
     melCache = nil
     audio.removeAll(keepingCapacity: false)
@@ -198,6 +202,18 @@ final class StreamingCoreMLPipeline: StreamingPipeline, @unchecked Sendable {
 
   private func process(
     _ samples: [Float], validSampleCount: Int? = nil, frameBase: Int = 0, final: Bool = false
+  ) throws -> StreamingASRUpdate {
+    // Swift cooperative executors do not promise an Objective-C autorelease-pool
+    // drain between audio packets. Core ML's temporary providers/tensors must not
+    // accumulate for the lifetime of the app or a long dictation task.
+    try autoreleasepool {
+      try processInPool(
+        samples, validSampleCount: validSampleCount, frameBase: frameBase, final: final)
+    }
+  }
+
+  private func processInPool(
+    _ samples: [Float], validSampleCount: Int?, frameBase: Int, final: Bool
   ) throws -> StreamingASRUpdate {
     let started = ContinuousClock.now
     let pcm = try Self.array(shape: [1, NSNumber(value: samples.count)])

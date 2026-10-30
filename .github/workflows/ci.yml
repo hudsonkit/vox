@@ -10,13 +10,11 @@ concurrency:
   cancel-in-progress: true
 jobs:
   swift:
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v5
-      - uses: swift-actions/setup-swift@v2
-        with:
-          swift-version: '6.2.3'
-      - run: swift test --package-path swift --jobs 3
+      - run: xcrun swift --version
+      - run: xcrun swift test --package-path swift --jobs 3
   clients-and-docs:
     runs-on: ubuntu-latest
     steps:
@@ -25,6 +23,6 @@ jobs:
         with:
           bun-version: 1.2.15
       - run: bun install --frozen-lockfile
-      - run: bun test packages/client/test packages/cli/test packages/web-client/test
       - run: bun run --cwd packages/client build
+      - run: bun test packages/client/test packages/cli/test packages/web-client/test
       - run: bun run docs:check
