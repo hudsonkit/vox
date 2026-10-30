@@ -22,6 +22,7 @@ actor ParakeetCoreMLRuntime: ParakeetRuntime {
     private let observeEvent: @Sendable (Event) -> Void
     private var session: Session?
     private var idleTask: Task<Void, Never>?
+    private var activeTranscriptions = 0
     private let managesResidency: Bool
     private struct LoadFlight {
         let id: UUID
@@ -126,15 +127,16 @@ actor ParakeetCoreMLRuntime: ParakeetRuntime {
                 lease = try await NativeASRResidency.shared.acquire(modelId: modelId, unload: { [weak self] in await self?.evict() })
             }
             publishProgress(0.85, status: "loading", flightID: flightID)
-            let loadedSession = try await loadSession(directory)
+            var loadedSession: Session? = try await loadSession(directory)
             event(.sessionLoaded)
             publishProgress(0.95, status: "warming", flightID: flightID)
             event(.primingStarted)
-            await prime(session: loadedSession)
+            await prime(session: loadedSession!)
             event(.primingFinished)
             // Readiness includes priming. Keep the session local across the
             // suspension so another call cannot use or replace it mid-warmup.
             session = loadedSession
+            loadedSession = nil // Only the resident slot owns the model before releasing its lease.
             publishProgress(1.0, status: "ready", flightID: flightID)
             loadFlight = nil
             event(.ready)
@@ -176,47 +178,55 @@ actor ParakeetCoreMLRuntime: ParakeetRuntime {
     }
 
     func transcribe(samples: [Float]) async throws -> ParakeetInferenceResult {
-        // Providers load first, but direct callers that arrive during warmup
-        // must also wait for the complete shared initialization flight.
         if let flight = loadFlight {
             event(.transcriptionJoinedLoad)
             try await flight.task.value
         }
         try Task.checkCancellation()
-        guard let session else {
-            throw NSError(domain: "VoxEngine", code: 4, userInfo: [
-                NSLocalizedDescriptionKey: "Parakeet runtime is not initialized."
-            ])
-        }
-
+        // Check readiness without capturing a model across a residency-acquire await.
+        guard session != nil else { throw notInitialized() }
         idleTask?.cancel(); idleTask = nil
+        activeTranscriptions += 1
         var lease: UUID?
         do {
             if managesResidency {
                 lease = try await NativeASRResidency.shared.acquire(modelId: modelId, unload: { [weak self] in await self?.evict() })
             }
-            let result = try await session.transcribe(samples)
+            guard session != nil else { throw notInitialized() }
+            var activeSession = session
+            let result = try await activeSession!.transcribe(samples)
+            activeSession = nil // Do not retain a second model through the release await.
+            activeTranscriptions -= 1
             if let lease { await NativeASRResidency.shared.release(lease) }
             scheduleIdle()
             return result
         } catch {
+            activeTranscriptions -= 1
             if let lease { await NativeASRResidency.shared.release(lease) }
             scheduleIdle()
             throw error
         }
     }
 
+    private func notInitialized() -> NSError {
+        NSError(domain: "VoxEngine", code: 4, userInfo: [NSLocalizedDescriptionKey: "Parakeet runtime is not initialized."])
+    }
+
     func computePlacement() async -> CoreMLPlacement? { session?.placement }
     private func evict() {
         idleTask?.cancel(); idleTask = nil; session = nil
     }
+    private func evictIfIdle() {
+        guard activeTranscriptions == 0, loadFlight == nil else { return }
+        evict()
+    }
     private func scheduleIdle() {
-        guard managesResidency else { return }
+        guard managesResidency, activeTranscriptions == 0, loadFlight == nil, session != nil else { return }
         idleTask?.cancel()
         let seconds = ProcessInfo.processInfo.environment["VOX_ASR_IDLE_SECONDS"].flatMap(Double.init) ?? StreamingASRDefaults.idleUnloadSeconds
         guard seconds.isFinite, seconds > 0 else { return }
         idleTask = Task { [weak self] in
-            do { try await Task.sleep(for: .seconds(seconds)); await self?.evict() } catch { }
+            do { try await Task.sleep(for: .seconds(seconds)); await self?.evictIfIdle() } catch { }
         }
     }
 

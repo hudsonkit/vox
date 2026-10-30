@@ -189,10 +189,12 @@ public actor NativeStreamingASR: ASRProvider {
       // Clear the prior model before loading another one. Never hold two encoder instances.
       pipeline = nil
       progress(ModelProgress(modelId: spec.id, progress: 0.85, status: "loading"))
-      let loaded = try await loadPipeline(spec, directory ?? store.directory, language)
+      var loaded: (any StreamingPipeline)? = try await loadPipeline(
+        spec, directory ?? store.directory, language)
       progress(ModelProgress(modelId: spec.id, progress: 0.95, status: "warming"))
-      try loaded.prime()
+      try loaded!.prime()
       pipeline = loaded
+      loaded = nil  // Eviction must drop the only model reference after the lease is released.
       self.language = language
       progress(ModelProgress(modelId: spec.id, progress: 1, status: "ready"))
       if let lease { await NativeASRResidency.shared.release(lease) }
@@ -359,7 +361,8 @@ public actor NativeStreamingASR: ASRProvider {
       let metrics = TranscriptionMetrics(
         traceId: id.uuidString, audioDurationMs: loaded.audioDurationMs,
         inputBytes: loaded.inputBytes, wasPreloaded: wasPreloaded, fileCheckMs: 0, modelCheckMs: 0,
-        modelLoadMs: modelLoadMs, audioLoadMs: loaded.audioLoadMs, audioPrepareMs: 0, inferenceMs: elapsed,
+        modelLoadMs: modelLoadMs, audioLoadMs: loaded.audioLoadMs, audioPrepareMs: 0,
+        inferenceMs: elapsed,
         totalMs: Int(Date().timeIntervalSince(totalStarted) * 1000))
       return TranscriptionOutput(
         modelId: modelId, text: result.text, elapsedMs: metrics.totalMs, metrics: metrics,
