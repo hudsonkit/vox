@@ -38,7 +38,7 @@
 - Idle unload default 60 s; VOX_ASR_IDLE_SECONDS=0 disables; preload after eviction.
 - Private Unix transport is intentional cross-process mode for Talkie and other app processes.
 
-- Standalone voxd: set VOX_SOCKET_PATH + VOX_AUTH_TOKEN for the same private transport; no TCP listener in that mode.
+- Standalone voxd --private: default ~/.vox/voxd.sock, fresh system-random 256-bit token, no TCP listener. VOX_SOCKET_PATH overrides path; optional explicit VOX_AUTH_TOKEN overrides token. No token in argv, process env or launchd plist is needed.
 
 - Current StreamingASRDefaults.modelId: nemotron:unified-560ms; new Native provider is included when loading legacy custom ASR provider configurations unless the same provider id is explicitly configured.
 
@@ -56,7 +56,7 @@
 
 ## Private capability discovery
 
-- Private standalone voxd already accepts VOX_SOCKET_PATH + VOX_AUTH_TOKEN and opens no TCP listener.
+- Official private bootstrap: voxd --private generates/publishes its own credential; explicit env pair remains supported. No daemon/client auto-launch or production launch-service replacement.
 - Private mode atomically publishes VOX_RUNTIME_PATH, else VOX_HOME/runtime.json, else ~/.vox/runtime.json. Parent 0700, same-user regular file 0600, nlink=1, 64 KiB maximum; symlink-safe reads/writes and same-UID socket peer check.
 - Root fields: schemaVersion=1, transport=unix+ws+json-rpc, instanceId UUID, socketPath absolute, authToken inline, port=0, plus existing version/serviceName/pid/startedAt metadata. startedAt keeps JSONEncoder seconds-since-2001 representation. No authTokenPath.
 - VoxEndpoint.discovered() / VoxDaemonClient.connectDiscovered(): explicit env endpoint+token pair wins; either present requires both nonempty; otherwise secure capability file. No missing/invalid/TCP fallback, no daemon launch.
@@ -64,3 +64,6 @@
 - RuntimeRegistry.read and health return metadata, never credentials. Never log raw capability JSON. TypeScript TCP discovery/CLI refuse private files rather than connecting/launching another TCP daemon; private TS transport is not implemented.
 
 - Scoped ElevenLabs credentials.ELEVENLABS_API_KEY supported for synthesize.generate/startSession and voices with explicit modelId, through in-process or bundled voxttsd. No mutation/persistence of lent key, no retry against another account; inventory stays configured-only. OpenAI static voices also accept scoped keys; unsupported scoped voice providers error. Never send keys via voice-list query URLs. Swift VoxClient uses generic call, no engine dependency.
+
+- PrivateRuntimeConfiguration.resolve parses --private / VOX_SOCKET_PATH; default socket VOX_HOME/voxd.sock, system CSPRNG 32-byte token, optional validated explicit auth override; invalid/empty explicit config and --port conflict fail. Generated secrets never enter process environment or logs; client incomplete-env-pair rules stay strict.
+- Private publication checks prior owner PID before replacing legacy 0644 metadata: live PID blocks startup and rolls back listener; only a stale same-user record can upgrade to 0600 capability. Malformed/unsafe metadata fails. Never hand-write a token/chmod an active legacy record as a workaround. Operator stops/reconfigures the existing host deliberately; isolated tests use their own VOX_HOME/runtime path.

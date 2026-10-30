@@ -50,8 +50,19 @@ public final class PrivateRuntimeRegistration: @unchecked Sendable {
     public init(runtime: RuntimeInfo, authToken: String, url: URL = RuntimePaths.runtimeFileURL()) throws {
         let capability = try PrivateRuntimeCapability(runtime: runtime, authToken: authToken)
         let lease = try VoxPrivateFiles.lock(url)
-        do { try VoxPrivateFiles.write(JSONEncoder().encode(capability), to: url) }
-        catch { close(lease); throw error }
+        do {
+            // Older TCP daemons do not hold our lease. Refuse a live existing owner
+            // rather than clobbering its registry and silently creating a second engine.
+            do {
+                let existing = try VoxPrivateFiles.readRegistryMetadata(url)
+                guard existing.pid > 0 else { throw POSIXError(.EACCES) }
+                let live = kill(existing.pid, 0)
+                guard live != 0, errno == ESRCH else { throw POSIXError(.EADDRINUSE) }
+            } catch let error as POSIXError where error.code == .ENOENT {
+                // No previous registration.
+            }
+            try VoxPrivateFiles.write(JSONEncoder().encode(capability), to: url)
+        } catch { close(lease); throw error }
         self.capability = capability; self.url = url; self.lease = lease
     }
     public func invalidate() {

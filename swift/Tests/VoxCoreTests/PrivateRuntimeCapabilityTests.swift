@@ -92,6 +92,25 @@ struct PrivateRuntimeCapabilityTests {
         try VoxPrivateFiles.write(legacy, to: url)
         #expect(throws: (any Error).self) { try PrivateRuntimeCapability.read(from: url) }
     }
+    @Test func legacyMigrationRefusesLiveOwnerAndReplacesOnlyStaleMetadata() throws {
+        let (directory, url) = paths()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let current = runtime(directory)
+        let liveLegacy = RuntimeInfo(version: "old", serviceName: "Vox", port: 42137, pid: getpid(), startedAt: Date())
+        let legacyBytes = try JSONEncoder().encode(liveLegacy)
+        try VoxPrivateFiles.write(legacyBytes, to: url)
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: url.path)
+        #expect(throws: (any Error).self) { try PrivateRuntimeRegistration(runtime: current, authToken: "new-test-token", url: url) }
+        #expect(try Data(contentsOf: url) == legacyBytes)
+        #expect(try mode(url) == 0o644)
+        let staleLegacy = RuntimeInfo(version: "old", serviceName: "Vox", port: 42137, pid: Int32.max, startedAt: Date())
+        try JSONEncoder().encode(staleLegacy).write(to: url)
+        let registration = try PrivateRuntimeRegistration(runtime: current, authToken: "new-test-token", url: url)
+        defer { registration.invalidate() }
+        #expect(try mode(url) == 0o600)
+        #expect(try PrivateRuntimeCapability.read(from: url)?.authToken == "new-test-token")
+    }
+
     private func mode(_ url: URL) throws -> Int {
         (try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as! NSNumber).intValue
     }

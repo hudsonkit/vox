@@ -194,8 +194,17 @@ func loadEngines() -> (EngineManager, TTSEngineManager, String) {
 
 let port = parsePort()
 let host = VoxDefaults.resolvedHost()
-let authToken = ProcessInfo.processInfo.environment["VOX_AUTH_TOKEN"].flatMap { $0.isEmpty ? nil : $0 }
-let socketPath = ProcessInfo.processInfo.environment["VOX_SOCKET_PATH"].flatMap { $0.isEmpty ? nil : $0 }
+let privateConfiguration: PrivateRuntimeConfiguration?
+do {
+    privateConfiguration = try PrivateRuntimeConfiguration.resolve(
+        arguments: CommandLine.arguments, environment: ProcessInfo.processInfo.environment)
+} catch {
+    fputs("Failed to configure Vox daemon: \(error.localizedDescription)\n", stderr)
+    exit(1)
+}
+let authToken = privateConfiguration?.authToken
+    ?? ProcessInfo.processInfo.environment["VOX_AUTH_TOKEN"].flatMap { $0.isEmpty ? nil : $0 }
+let socketPath = privateConfiguration?.socketPath
 let (engine, ttsEngine, defaultSynthesisModelId) = loadEngines()
 let service = VoxRuntimeService(
     port: port,

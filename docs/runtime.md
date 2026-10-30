@@ -267,9 +267,26 @@ installed diarization backend. TTS cancellation uses synthesis sessions; raw
 
 ### Private runtime discovery
 
-A host starts one private `voxd` with `VOX_SOCKET_PATH` and `VOX_AUTH_TOKEN`.
-Standalone `voxd` supports this mode; it opens no TCP listener. No app should
-start a replacement daemon when discovery or authentication fails.
+Start the user-owned shared daemon with:
+
+```sh
+voxd --private
+```
+
+This selects `VOX_HOME/voxd.sock` (default `~/.vox/voxd.sock`) and generates a fresh
+256-bit credential with the system secure random source on each launch. It opens
+no TCP listener. The credential is published only in the owner-only capability;
+it is not put in process environment or command arguments. A user LaunchAgent
+needs the executable path and `--private` in its `ProgramArguments`, not a token
+in the plist. This change does not install or replace a launch service.
+
+`VOX_SOCKET_PATH` can select a different private socket, with or without
+`--private`. The daemon generates a credential when `VOX_AUTH_TOKEN` is absent;
+a nonempty valid explicit token remains available for deliberate host control.
+An explicitly empty/invalid token fails rather than being replaced. Do not
+combine private mode with `--port`. Independently launched GUI clients should
+use capability discovery, not inherit a socket-only environment override.
+No app should start a replacement daemon when discovery or authentication fails.
 
 In private mode, the daemon atomically publishes a credential-bearing capability
 at `VOX_RUNTIME_PATH`, or `VOX_HOME/runtime.json`, or `~/.vox/runtime.json`.
@@ -286,7 +303,7 @@ All fields are at the top level:
 | `transport` | `unix+ws+json-rpc` |
 | `instanceId` | UUID, changes on each publication |
 | `socketPath` | Absolute private Unix socket path |
-| `authToken` | Inline host-provisioned token; no `authTokenPath` indirection |
+| `authToken` | Current server token (generated unless explicitly overridden); no `authTokenPath` indirection |
 | `port` | `0`; never interpret this as a request to use a default TCP port |
 | `version`, `serviceName`, `pid` | Existing Vox runtime metadata |
 | `startedAt` | Existing JSONEncoder Date representation: seconds since 2001-01-01 UTC |
@@ -300,6 +317,14 @@ All fields are at the top level:
    TCP metadata do not trigger TCP fallback or daemon launch.
 3. On connect, verify socket safety and the same-user server peer before sending
    the token. A reconnect must reread the capability and start a new session.
+
+Private startup refuses a runtime record whose PID is still live, including
+legacy TCP metadata without a token. Stop the existing host deliberately before
+switching the canonical runtime to private mode. Do not fix an old `0644` record
+by hand-writing a token or merely changing its permissions. Stale same-user
+legacy metadata can be atomically replaced with a new `0600` capability after
+the old PID is gone. Malformed or unsafe records fail closed; verify ownership
+before manual cleanup. Use an isolated `VOX_HOME` and `VOX_RUNTIME_PATH` for tests.
 
 Only one private publisher can hold a runtime-file lease. Isolated test hosts
 must select their own `VOX_RUNTIME_PATH`. Publication failure closes the new
@@ -320,8 +345,8 @@ let status = try await client.nativeStreamingStatus()
 await client.disconnect()
 ```
 
-The host owns daemon launch and token provisioning. This change does not install
-or replace a launch service. Direct TCP mode remains available for deliberate
+The host owns daemon launch; `voxd --private` owns secure token generation and
+publication unless an explicit credential override is supplied. Direct TCP mode remains available for deliberate
 legacy deployments; its registry is metadata, not a private capability.
 
 ### PCM wire contract

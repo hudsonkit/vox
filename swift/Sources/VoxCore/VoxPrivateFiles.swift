@@ -61,6 +61,15 @@ public enum VoxPrivateFiles {
     }
 
     public static func read(_ url: URL, maxBytes: Int = 65536) throws -> Data {
+        try read(url, maxBytes: maxBytes, allowLegacyMetadata: false)
+    }
+
+    /// Startup migration guard only. This never authenticates a client from weak metadata.
+    static func readRegistryMetadata(_ url: URL) throws -> RuntimeInfo {
+        try JSONDecoder().decode(RuntimeInfo.self, from: read(url, maxBytes: 65536, allowLegacyMetadata: true))
+    }
+
+    private static func read(_ url: URL, maxBytes: Int, allowLegacyMetadata: Bool) throws -> Data {
         guard maxBytes > 0, maxBytes <= 16 * 1024 * 1024 else { throw POSIXError(.EINVAL) }
         let (directory, name) = try parent(url, create: false)
         defer { close(directory) }
@@ -69,7 +78,9 @@ public enum VoxPrivateFiles {
         defer { close(fd) }
         var info = stat()
         guard fstat(fd, &info) == 0, info.st_mode & S_IFMT == S_IFREG,
-              info.st_uid == geteuid(), info.st_mode & 0o777 == 0o600, info.st_nlink == 1,
+              info.st_uid == geteuid(),
+              (info.st_mode & 0o777 == 0o600 || (allowLegacyMetadata && info.st_mode & 0o777 == 0o644)),
+              info.st_nlink == 1,
               info.st_size >= 0, info.st_size <= maxBytes else { throw POSIXError(.EACCES) }
         var data = Data(), bytes = [UInt8](repeating: 0, count: 4096)
         while true {
