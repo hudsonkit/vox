@@ -25,6 +25,8 @@ public actor VoxDaemonClient {
     deinit { eventsContinuation?.finish(); eventsTask?.cancel(); wire?.close() }
     public var isConnected: Bool { connected }
 
+    public func connectDiscovered() async throws { try await connect(VoxEndpoint.discovered()) }
+
     public func connect(_ endpoint: VoxEndpoint) async throws {
         guard wire == nil else { throw VoxClientError.alreadyConnected }
         guard !clientId.isEmpty else { throw VoxClientError.invalidEndpoint }

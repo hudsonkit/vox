@@ -49,6 +49,62 @@ struct VoxClientTests {
         #expect(await client.isConnected == false)
     }
 
+    @Test func runtimeServicePublishesCapabilityAndRollsBackAConflictingPublisher() async throws {
+        let directory = URL(fileURLWithPath: "/private/tmp").appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("runtime.json"), token = UUID().uuidString
+        let socket = directory.appendingPathComponent("vox.sock").path
+        let preferences: @Sendable () -> VoxPreferences = {
+            VoxPreferences(speech: VoxSpeechPreferences(modelDownloadPolicy: .never))
+        }
+        let service = VoxRuntimeService(port: 0, authToken: token, socketPath: socket,
+                                        privateCapabilityURL: file, preferencesLoader: preferences)
+        try service.start(); defer { service.stop() }
+        let endpoint = try VoxEndpoint.discovered(environment: ["VOX_RUNTIME_PATH": file.path])
+        let client = VoxDaemonClient(clientId: "talkie")
+        try await client.connect(endpoint)
+        let status = try await client.nativeStreamingStatus()
+        #expect(status.idleUnloadSeconds >= 0)
+        let health = try await client.call("health")
+        #expect(!String(decoding: try JSONEncoder().encode(health), as: UTF8.self).contains(token))
+        let secondSocket = directory.appendingPathComponent("second.sock").path
+        let conflict = VoxRuntimeService(port: 0, authToken: "other", socketPath: secondSocket,
+                                         privateCapabilityURL: file, preferencesLoader: preferences)
+        #expect(throws: (any Error).self) { try conflict.start() }
+        conflict.stop()
+        #expect(!FileManager.default.fileExists(atPath: secondSocket))
+        #expect(try PrivateRuntimeCapability.read(from: file)?.authToken == token)
+        _ = try await client.nativeStreamingStatus()
+        await client.disconnect()
+        service.stop()
+        #expect(try PrivateRuntimeCapability.read(from: file) == nil)
+    }
+
+    @Test func discoversPrivateCapabilityWithoutLaunchingOrFallingBack() async throws {
+        let f = try Fixture()
+        f.bridge.handle("identity") { params, reply in reply(["clientId": params?["clientId"] as? String ?? ""], nil) }
+        let url = f.directory.appendingPathComponent("runtime.json")
+        let runtime = RuntimeInfo(version: "test", serviceName: "Vox", port: 0, pid: getpid(), startedAt: Date(), socketPath: f.path)
+        let registration = try PrivateRuntimeRegistration(runtime: runtime, authToken: f.token, url: url)
+        defer { registration.invalidate() }
+        let endpoint = try VoxEndpoint.discovered(environment: ["VOX_RUNTIME_PATH": url.path])
+        let client = VoxDaemonClient(clientId: "talkie")
+        try await client.connect(endpoint)
+        #expect(try await client.call("identity")["clientId"] == "talkie")
+        await client.disconnect()
+        for environment in [["VOX_SOCKET_PATH": f.path], ["VOX_AUTH_TOKEN": f.token],
+                            ["VOX_RUNTIME_PATH": url.path, "VOX_SOCKET_PATH": "", "VOX_AUTH_TOKEN": f.token]] {
+            #expect(throws: VoxClientError.invalidEndpoint) { try VoxEndpoint.discovered(environment: environment) }
+        }
+        guard case .unix(let path, _) = try VoxEndpoint.discovered(environment: ["VOX_SOCKET_PATH": f.path,
+            "VOX_AUTH_TOKEN": f.token, "VOX_RUNTIME_PATH": "/not-used"]) else {
+            Issue.record("Explicit host pair must take precedence"); return
+        }
+        #expect(path == f.path)
+        registration.invalidate()
+        #expect(throws: VoxClientError.disconnected) { try VoxEndpoint.discovered(environment: ["VOX_RUNTIME_PATH": url.path]) }
+    }
+
     @Test func largeMessagesAndServerShutdownReleasePendingCalls() async throws {
         let f = try Fixture(), calls = Recorder()
         f.bridge.handle("echo") { params, reply in reply(["text": params?["text"] as? String ?? ""], nil) }

@@ -12,12 +12,23 @@ export class RuntimeDiscovery {
 
     try {
       const raw = readFileSync(runtimePath, "utf8");
-      const parsed = JSON.parse(raw) as RuntimeInfo;
+      const parsed = JSON.parse(raw) as RuntimeInfo & {
+        socketPath?: unknown; authToken?: unknown; authTokenPath?: unknown; transport?: unknown;
+      };
+      if (parsed && (parsed.socketPath !== undefined || parsed.authToken !== undefined ||
+          parsed.authTokenPath !== undefined || parsed.transport === "unix+ws+json-rpc")) {
+        throw new ServiceUnavailableError(
+          "Private Vox runtime discovered; this TCP client cannot use it. Use Swift VoxClient; no TCP fallback or second daemon was started."
+        );
+      }
       if (!parsed.port || !parsed.pid || !parsed.serviceName) {
         return null;
       }
-      return parsed;
-    } catch {
+      // Project metadata, never return unexpected credential fields to status/log consumers.
+      return { version: parsed.version, serviceName: parsed.serviceName, port: parsed.port,
+        pid: parsed.pid, startedAt: parsed.startedAt };
+    } catch (error) {
+      if (error instanceof ServiceUnavailableError) throw error;
       return null;
     }
   }

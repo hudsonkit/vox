@@ -15,6 +15,22 @@ public enum VoxEndpoint: Sendable, CustomStringConvertible, CustomDebugStringCon
     }
     public var debugDescription: String { description }
 
+    /// Host capability discovery only. Never launches a daemon or reads TCP metadata as authority.
+    /// Explicit environment endpoint pairs take precedence over the owner-only runtime file.
+    public static func discovered(environment: [String: String] = ProcessInfo.processInfo.environment) throws -> VoxEndpoint {
+        let socket = environment["VOX_SOCKET_PATH"], token = environment["VOX_AUTH_TOKEN"]
+        if socket != nil || token != nil {
+            guard let socket, !socket.isEmpty, let token, !token.isEmpty else { throw VoxClientError.invalidEndpoint }
+            return .unix(socketPath: socket, authToken: token)
+        }
+        let url: URL
+        if let path = environment["VOX_RUNTIME_PATH"], !path.isEmpty { url = URL(fileURLWithPath: path) }
+        else if let home = environment["VOX_HOME"], !home.isEmpty { url = URL(fileURLWithPath: home).appendingPathComponent("runtime.json") }
+        else { url = RuntimePaths.voxHomeURL(environment: environment).appendingPathComponent("runtime.json") }
+        guard let capability = try PrivateRuntimeCapability.read(from: url) else { throw VoxClientError.disconnected }
+        return try runtime(capability.runtime, authToken: capability.authToken)
+    }
+
     public static func runtime(_ runtime: RuntimeInfo, authToken: String, allowTCP: Bool = false,
                                tcpHost: String = "127.0.0.1") throws -> VoxEndpoint {
         if let path = runtime.socketPath { return .unix(socketPath: path, authToken: authToken) }

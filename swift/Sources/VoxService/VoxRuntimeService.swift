@@ -6,6 +6,9 @@ public final class VoxRuntimeService: @unchecked Sendable {
     private let log = VoxLog.service
     private let port: UInt16
     private let socketPath: String?
+    private let authToken: String?
+    private let privateCapabilityURL: URL?
+    private var privateRegistration: PrivateRuntimeRegistration?
     private let bridge: ServiceBridge
     private let asrEngine: EngineManager
     private let annotationEngine: AnnotationManager
@@ -33,12 +36,15 @@ public final class VoxRuntimeService: @unchecked Sendable {
         defaultSynthesisModelId: String = TTSDefaults.modelId,
         authToken: String? = nil,
         socketPath: String? = nil,
+        privateCapabilityURL: URL? = nil,
         preferencesLoader: @escaping @Sendable () -> VoxPreferences = {
             (try? VoxPreferences.load()) ?? VoxPreferences()
         }
     ) {
         self.port = socketPath == nil ? port : 0
         self.socketPath = socketPath
+        self.authToken = authToken
+        self.privateCapabilityURL = privateCapabilityURL
         self.bridge = ServiceBridge(port: port, serviceName: "Vox", bindAddress: bindAddress, authToken: authToken, socketPath: socketPath)
         self.asrEngine = engine
         self.annotationEngine = annotationEngine
@@ -60,7 +66,16 @@ public final class VoxRuntimeService: @unchecked Sendable {
             startedAt: startedAt,
             socketPath: socketPath
         )
-        try RuntimeRegistry.write(runtime)
+        do {
+            if socketPath != nil {
+                guard let authToken else { throw POSIXError(.EACCES) }
+                privateRegistration = try PrivateRuntimeRegistration(runtime: runtime, authToken: authToken,
+                    url: privateCapabilityURL ?? RuntimePaths.runtimeFileURL())
+            } else { try RuntimeRegistry.write(runtime) }
+        } catch {
+            bridge.stop()
+            throw error
+        }
 
         let speechPreferences = preferencesLoader().speech
         if speechPreferences.modelDownloadPolicy.warmsAtServiceStart {
@@ -74,7 +89,8 @@ public final class VoxRuntimeService: @unchecked Sendable {
     public func stop() {
         bridge.stop()
         Task { await streamingSessions.shutdown() }
-        try? RuntimeRegistry.remove()
+        if socketPath != nil { privateRegistration?.invalidate(); privateRegistration = nil }
+        else { try? RuntimeRegistry.remove() }
     }
 
     func performSynthesizeGenerate(params: [String: Any]?) async throws -> SynthesisOutput {
@@ -1574,7 +1590,10 @@ public final class VoxRuntimeService: @unchecked Sendable {
     }
 
     private func makeDoctorReport() async -> DoctorReport {
-        let runtimeExists = ((try? RuntimeRegistry.read()) != nil)
+        let runtimeExists: Bool
+        if socketPath != nil {
+            runtimeExists = (try? PrivateRuntimeCapability.read(from: privateCapabilityURL ?? RuntimePaths.runtimeFileURL())) != nil
+        } else { runtimeExists = ((try? RuntimeRegistry.read()) != nil) }
         let asrModels = await asrEngine.models()
         let asrModel = asrModels.first
         let ttsModels = await ttsEngine.models()

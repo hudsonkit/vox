@@ -114,7 +114,7 @@ A host app can construct `VoxRuntimeService` or `ServiceBridge` with `socketPath
 
 The socket directory must be owned by the current user. The runtime creates it with mode `0700`, creates the socket with mode `0600`, rejects symlink paths, and checks the connected peer UID. Clients must send `x-lattices-token` during WebSocket upgrade. The server rejects browser `Origin` headers, invalid `Host` headers, duplicate headers, and unauthorized upgrades before RPC dispatch. Use `Host: localhost` and request path `/`.
 
-Private connections retain the same JSON-RPC methods, events, and connection ownership. The transport limits incoming frames to 16 MiB and queued output to 32 MiB. The runtime registry reports `port: 0` and `socketPath` for a private endpoint. The host owns capability publication and client discovery; the standalone CLI and browser bridge continue to use their existing TCP configuration.
+Private connections retain the same JSON-RPC methods, events, and connection ownership. The transport limits incoming frames to 16 MiB and queued output to 32 MiB. The runtime registry reports `port: 0` and `socketPath` for a private endpoint. `VoxRuntimeService` publishes the owner-only capability described below. A raw `ServiceBridge` host can publish it with `PrivateRuntimeRegistration`. The TypeScript TCP client/CLI refuse private capabilities; TCP and browser deployments retain their explicit TCP configuration.
 
 ## Configuration
 
@@ -211,8 +211,9 @@ outgoing frames and bounds incoming messages to 16 MiB and queued output to 32 M
 `VoxEndpoint.runtime(runtime, authToken:)` selects a private socket from
 `RuntimeInfo`. It refuses TCP metadata unless `allowTCP: true` is explicit.
 Direct `.tcp(host:port:authToken:)` selection is also an explicit opt-in. This is
-unencrypted WebSocket; use a trusted loopback host. The client never launches a
-daemon, discovers credentials, reconnects, or falls back to another transport.
+unencrypted WebSocket; use a trusted loopback host. The client never launches a daemon, reconnects, or falls back to another
+transport. Use `connectDiscovered()` for the owner-only host capability described
+below, or pass an explicit endpoint.
 
 `listModels()`, `listCatalog()`, `installModel(_:onProgress:)`,
 `preloadModel(_:onProgress:)`, and `transcribeFile(path:modelId:)` return
@@ -244,6 +245,65 @@ fields. It exposes the existing daemon contract, including its 120-second native
 stream limit. `annotate.file` remains a file-first scaffold, not a guarantee of an
 installed diarization backend. TTS cancellation uses synthesis sessions; raw
 `synthesize.generate` does not have a per-request cancel RPC.
+
+### Private runtime discovery
+
+A host starts one private `voxd` with `VOX_SOCKET_PATH` and `VOX_AUTH_TOKEN`.
+Standalone `voxd` supports this mode; it opens no TCP listener. No app should
+start a replacement daemon when discovery or authentication fails.
+
+In private mode, the daemon atomically publishes a credential-bearing capability
+at `VOX_RUNTIME_PATH`, or `VOX_HOME/runtime.json`, or `~/.vox/runtime.json`.
+The immediate directory is owner-only `0700`; the file is a same-user regular
+file with mode `0600`, one hard link, and a 64 KiB reader limit. Reads and writes
+reject symlink ancestors and leaves. Treat this file as a credential, not a
+status document. Do not print or copy its raw JSON into logs or diagnostics.
+
+All fields are at the top level:
+
+| Field | Contract |
+|---|---|
+| `schemaVersion` | `1` |
+| `transport` | `unix+ws+json-rpc` |
+| `instanceId` | UUID, changes on each publication |
+| `socketPath` | Absolute private Unix socket path |
+| `authToken` | Inline host-provisioned token; no `authTokenPath` indirection |
+| `port` | `0`; never interpret this as a request to use a default TCP port |
+| `version`, `serviceName`, `pid` | Existing Vox runtime metadata |
+| `startedAt` | Existing JSONEncoder Date representation: seconds since 2001-01-01 UTC |
+
+`VoxEndpoint.discovered()` and `VoxDaemonClient.connectDiscovered()` use this order:
+
+1. If either `VOX_SOCKET_PATH` or `VOX_AUTH_TOKEN` is present, require both to be
+   nonempty and use that explicit pair. An incomplete pair is an error.
+2. Otherwise read the capability file at the selected runtime path. Verify file
+   safety, schema and private transport. Missing, malformed, unsafe and legacy
+   TCP metadata do not trigger TCP fallback or daemon launch.
+3. On connect, verify socket safety and the same-user server peer before sending
+   the token. A reconnect must reread the capability and start a new session.
+
+Only one private publisher can hold a runtime-file lease. Isolated test hosts
+must select their own `VOX_RUNTIME_PATH`. Publication failure closes the new
+listener instead of leaving an undiscoverable service. Normal shutdown removes
+only the capability whose `instanceId` belongs to that registration. After a
+crash, a new host can acquire the released lease and replace stale metadata.
+Swift `RuntimeRegistry.read()` still returns metadata only; health/status never
+include `authToken`. The current TypeScript TCP client/CLI reject a private
+capability explicitly rather than starting or connecting to a second TCP daemon.
+They do not yet implement private Unix transport.
+
+```swift
+import VoxClient
+
+let client = VoxDaemonClient(clientId: "talkie")
+try await client.connectDiscovered()
+let status = try await client.nativeStreamingStatus()
+await client.disconnect()
+```
+
+The host owns daemon launch and token provisioning. This change does not install
+or replace a launch service. Direct TCP mode remains available for deliberate
+legacy deployments; its registry is metadata, not a private capability.
 
 ### PCM wire contract
 

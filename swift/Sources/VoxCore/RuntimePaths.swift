@@ -93,8 +93,10 @@ public enum VoxDefaults {
 }
 
 public enum RuntimePaths {
-    public static func voxHomeURL() -> URL {
-        if let override = ProcessInfo.processInfo.environment["VOX_HOME"], !override.isEmpty {
+    public static func voxHomeURL() -> URL { voxHomeURL(environment: ProcessInfo.processInfo.environment) }
+
+    public static func voxHomeURL(environment: [String: String]) -> URL {
+        if let override = environment["VOX_HOME"], !override.isEmpty {
             return URL(fileURLWithPath: override, isDirectory: true)
         }
 

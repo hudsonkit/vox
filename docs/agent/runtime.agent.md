@@ -17,7 +17,7 @@
 - Private host mode: pass `socketPath` plus `authToken` to `VoxRuntimeService` or `ServiceBridge`; no TCP listener opens.
 - Private clients send `x-lattices-token` before WebSocket upgrade, with `Host: localhost` and path `/`; browser Origin headers are rejected.
 - Private transport checks peer UID, uses directory `0700` and socket `0600`, and rejects symlink paths.
-- Private registry metadata includes `socketPath` and `port: 0`; host capability discovery owns this mode. Standalone CLI/browser TCP behavior is unchanged.
+- Private registry metadata includes `socketPath` and `port: 0`; VoxRuntimeService publishes the owner-only capability. A raw ServiceBridge host can use PrivateRuntimeRegistration. TypeScript TCP discovery refuses private capabilities.
 - Frame bounds: 16 MiB inbound, 32 MiB queued outbound; connection ID and client ID still own sessions.
 
 ## Native app-captured PCM
@@ -45,7 +45,7 @@
 ## Swift companion client
 
 - Product/module `VoxClient`, public actor `VoxDaemonClient(clientId:)`; depends only on VoxCore, no engines/resources. Root and nested Swift manifests export it.
-- Explicit `connect(.unix(socketPath:authToken:))`; Unix path/ownership/permission/peer UID checks, authenticated and validated WebSocket upgrade. No launch, discovery, reconnect or fallback.
+- Explicit `connect(.unix(socketPath:authToken:))`; Unix path/ownership/permission/peer UID checks, authenticated and validated WebSocket upgrade. No launch, reconnect or fallback; connectDiscovered reads the private host capability.
 - `VoxEndpoint.runtime(_:authToken:allowTCP:tcpHost:)` requires allowTCP=true for TCP metadata; direct `.tcp(host:port:authToken:)` is explicit opt-in, unencrypted trusted-loopback use.
 - Typed `startPCMStream(modelId:)`, `appendPCMStream(sessionId:sequence:samples:)`, `finishPCMStream(sessionId:)`, `cancelPCMStream(sessionId:)`, `nativeStreamingStatus()`; shared DTOs re-exported from VoxCore.
 - Generic Sendable Codable JSONValue from listModels/listCatalog/installModel/preloadModel/transcribeFile; `call(_:params:timeout:onProgress:)` exposes other existing routes, overrides clientId with owned identity.
@@ -53,3 +53,12 @@
 - One typed append/finish in flight per session; 64 pending RPC limit; 16 MiB messages/32 MiB Unix queued output. Cancel remains callable during append/finish.
 - Request task cancellation/timeout closes connection and fails all pending calls, never retries uncertain work; not a server download-cancel capability. Explicit reconnect starts a new session.
 - No new capability negotiation, VAD, confirmed boundaries, hints, model delete/download cancellation, language field, or streaming diarization. File annotation requires a backend; one-shot generate has disconnect cancellation, not a per-request cancel RPC.
+
+## Private capability discovery
+
+- Private standalone voxd already accepts VOX_SOCKET_PATH + VOX_AUTH_TOKEN and opens no TCP listener.
+- Private mode atomically publishes VOX_RUNTIME_PATH, else VOX_HOME/runtime.json, else ~/.vox/runtime.json. Parent 0700, same-user regular file 0600, nlink=1, 64 KiB maximum; symlink-safe reads/writes and same-UID socket peer check.
+- Root fields: schemaVersion=1, transport=unix+ws+json-rpc, instanceId UUID, socketPath absolute, authToken inline, port=0, plus existing version/serviceName/pid/startedAt metadata. startedAt keeps JSONEncoder seconds-since-2001 representation. No authTokenPath.
+- VoxEndpoint.discovered() / VoxDaemonClient.connectDiscovered(): explicit env endpoint+token pair wins; either present requires both nonempty; otherwise secure capability file. No missing/invalid/TCP fallback, no daemon launch.
+- One private runtime publisher lease; publication failure stops new listener; stop removes only its own instance. Distinct test hosts need distinct VOX_RUNTIME_PATH.
+- RuntimeRegistry.read and health return metadata, never credentials. Never log raw capability JSON. TypeScript TCP discovery/CLI refuse private files rather than connecting/launching another TCP daemon; private TS transport is not implemented.
