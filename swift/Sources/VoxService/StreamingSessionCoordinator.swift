@@ -34,7 +34,11 @@ actor StreamingSessionCoordinator {
 
   func start(connectionID: String, clientId: String, modelId: String) async throws -> UUID {
     // Recover ownership after the engine's bounded orphan-session timeout.
-    if owner?.id != nil, await engine.activeSessionID() == nil { owner = nil }
+    if let current = owner, current.id != nil, !current.inFlight,
+      await engine.activeSessionID() == nil, owner?.generation == current.generation
+    {
+      owner = nil
+    }
     guard owner == nil, !clientId.isEmpty else { throw StreamingASRError.busy }
     let generation = UUID()
     owner = Owner(connectionID: connectionID, clientId: clientId, generation: generation)
@@ -96,7 +100,12 @@ actor StreamingSessionCoordinator {
   func cancel(id: UUID, connectionID: String, clientId: String) async throws {
     try validate(id, connectionID, clientId)
     owner = nil
-    try await engine.cancel(sessionId: id, clientId: clientId)
+    do { try await engine.cancel(sessionId: id, clientId: clientId) } catch StreamingASRError
+      .invalidSession
+    {
+      // Finish or timeout may have released the native owner across the await.
+      // This caller owned the coordinator; clearing it still suppresses a late final.
+    }
   }
   func disconnect(connectionID: String) async {
     guard let current = owner, current.connectionID == connectionID else { return }

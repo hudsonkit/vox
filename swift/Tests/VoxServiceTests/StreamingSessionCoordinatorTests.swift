@@ -78,3 +78,57 @@ struct StreamingSessionCoordinatorTests {
     }
   }
 }
+
+private actor FinishingStreamingEngine: StreamingSessionEngine {
+  var id: UUID?
+  var finishing = false
+  func begin(clientId: String, modelId: String, route: String) -> UUID {
+    let id = UUID()
+    self.id = id
+    return id
+  }
+  func append(sessionId: UUID, clientId: String, samples: [Float]) -> [StreamingASRUpdate] { [] }
+  func finish(sessionId: UUID, clientId: String) async throws -> StreamingASRUpdate {
+    id = nil
+    finishing = true
+    try await Task.sleep(for: .milliseconds(80))
+    return StreamingASRUpdate(
+      text: "final", words: [], endOfUtterance: false, endpointSource: nil, processedAudioMs: 0,
+      chunkLatencyMs: 0)
+  }
+  func cancel(sessionId: UUID, clientId: String) throws {
+    guard id == sessionId else { throw StreamingASRError.invalidSession }
+    id = nil
+  }
+  func activeSessionID() -> UUID? { id }
+}
+extension StreamingSessionCoordinatorTests {
+  @Test("An in-flight finish cannot be mistaken for an expired owner")
+  func finishKeepsOwnershipUntilReply() async throws {
+    let engine = FinishingStreamingEngine()
+    let coordinator: StreamingSessionCoordinator
+    coordinator = StreamingSessionCoordinator(engine: engine)
+    let id = try await coordinator.start(connectionID: "a", clientId: "talkie", modelId: "test")
+    let finishing = Task {
+      try await coordinator.finish(id: id, connectionID: "a", clientId: "talkie")
+    }
+    while !(await engine.finishing) { try await Task.sleep(for: .milliseconds(1)) }
+    await #expect(throws: StreamingASRError.self) {
+      try await coordinator.start(connectionID: "b", clientId: "other", modelId: "test")
+    }
+    #expect(try await finishing.value.text == "final")
+  }
+  @Test("Cancel acknowledges a completed native flush while suppressing its pending final reply")
+  func cancelDuringFinish() async throws {
+    let engine = FinishingStreamingEngine()
+    let coordinator: StreamingSessionCoordinator
+    coordinator = StreamingSessionCoordinator(engine: engine)
+    let id = try await coordinator.start(connectionID: "a", clientId: "talkie", modelId: "test")
+    let finishing = Task {
+      try await coordinator.finish(id: id, connectionID: "a", clientId: "talkie")
+    }
+    while !(await engine.finishing) { try await Task.sleep(for: .milliseconds(1)) }
+    try await coordinator.cancel(id: id, connectionID: "a", clientId: "talkie")
+    await #expect(throws: StreamingASRError.self) { try await finishing.value }
+  }
+}
