@@ -77,12 +77,30 @@ final class UnixWebSocket: ClientWire, @unchecked Sendable {
         withUnsafeMutableBytes(of: &address.sun_path) { dest in
             path.utf8CString.withUnsafeBytes { dest.copyBytes(from: $0) }
         }
+        let initialFlags = fcntl(fd, F_GETFL)
+        guard initialFlags >= 0, fcntl(fd, F_SETFL, initialFlags | O_NONBLOCK) == 0 else { throw POSIXError(.EIO) }
         let result = withUnsafePointer(to: &address) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
                 Darwin.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
             }
         }
-        guard result == 0 else { throw POSIXError(.ECONNREFUSED) }
+        if result != 0 {
+            guard errno == EINPROGRESS || errno == EWOULDBLOCK else { throw POSIXError(.ECONNREFUSED) }
+            let deadline = Date().addingTimeInterval(5)
+            var ready = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
+            while true {
+                let remaining = deadline.timeIntervalSinceNow
+                guard remaining > 0 else { throw VoxClientError.timeout }
+                let count = poll(&ready, 1, Int32(ceil(remaining * 1000)))
+                if count < 0, errno == EINTR { continue }
+                guard count > 0 else { throw VoxClientError.timeout }
+                var error: Int32 = 0, size = socklen_t(MemoryLayout<Int32>.size)
+                guard getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &size) == 0, error == 0,
+                      ready.revents & Int16(POLLOUT) != 0 else { throw POSIXError(.ECONNREFUSED) }
+                break
+            }
+        }
+        guard fcntl(fd, F_SETFL, initialFlags) == 0 else { throw POSIXError(.EIO) }
         var uid: uid_t = 0, gid: gid_t = 0
         guard getpeereid(fd, &uid, &gid) == 0, uid == geteuid() else { throw POSIXError(.EACCES) }
         let key = Data((0..<16).map { _ in UInt8.random(in: .min ... .max) }).base64EncodedString()
