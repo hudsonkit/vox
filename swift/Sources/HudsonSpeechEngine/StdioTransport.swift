@@ -182,28 +182,26 @@ public final class StdioTransport: @unchecked Sendable {
 
     private func startReadingStdout(_ pipe: Pipe) {
         let handle = pipe.fileHandleForReading
-        // FileHandle.availableData blocks. Use a dedicated thread, not Swift's
-        // cooperative executor or GCD's bounded global worker pool: both must
-        // remain available to callers, timeout continuations, and message dispatch.
+        // FileHandle.availableData blocks. Neither Swift's cooperative executor
+        // nor GCD's bounded global pool may be occupied by a persistent pipe read.
         Thread.detachNewThread { [weak self] in
             Thread.current.name = "Vox provider stdout"
             var buffer = Data()
             while self?.processIsRunning == true {
-                let chunk = handle.availableData
-                if chunk.isEmpty { break }
-                buffer.append(chunk)
-
-                while let newlineRange = buffer.range(of: Data([0x0A])) {
-                    let lineData = buffer.subdata(in: buffer.startIndex..<newlineRange.lowerBound)
-                    buffer.removeSubrange(buffer.startIndex...newlineRange.lowerBound)
-
-                    guard !lineData.isEmpty,
-                          let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any] else {
-                        continue
+                let hasData = autoreleasepool {
+                    let chunk = handle.availableData
+                    guard !chunk.isEmpty else { return false }
+                    buffer.append(chunk)
+                    while let newlineRange = buffer.range(of: Data([0x0A])) {
+                        let lineData = buffer.subdata(in: buffer.startIndex..<newlineRange.lowerBound)
+                        buffer.removeSubrange(buffer.startIndex...newlineRange.lowerBound)
+                        guard !lineData.isEmpty,
+                              let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any] else { continue }
+                        self?.handleMessage(json)
                     }
-
-                    self?.handleMessage(json)
+                    return true
                 }
+                if !hasData { break }
             }
         }
     }
@@ -213,11 +211,13 @@ public final class StdioTransport: @unchecked Sendable {
         Thread.detachNewThread { [weak self] in
             Thread.current.name = "Vox provider stderr"
             while self?.processIsRunning == true {
-                let chunk = handle.availableData
-                if chunk.isEmpty { break }
-                if let text = String(data: chunk, encoding: .utf8) {
-                    self?.appendStderr(text)
+                let hasData = autoreleasepool {
+                    let chunk = handle.availableData
+                    guard !chunk.isEmpty else { return false }
+                    if let text = String(data: chunk, encoding: .utf8) { self?.appendStderr(text) }
+                    return true
                 }
+                if !hasData { break }
             }
         }
     }
