@@ -111,6 +111,14 @@
 - synthesis identity is separate from the physical audio-output route
 - do not put reply dedupe, markdown flattening, fallback copy, preference storage, queue priority, or telemetry double-recording in this controller
 
+## Embedded cloud annotation
+
+- AnnotationManager()/RemoteAnnotationProvider are public VoxEngine file-upload surfaces on iOS; explicit elevenlabs:scribe_v2 or deepgram:nova-3, per-request providerCredentials, no ambient annotation key fallback.
+- App owns finalized readable input/security-scoped external access; Vox owns temp staging. Do not copy private staging paths or call capability helpers in the app.
+- Staging opens existing OS temp grant directly; random 0700 leaf/exclusive 0600 payload, no filesystem-root ancestor traversal/create/chmod. Descriptor cleanup is nonrecursive/idempotent; failures can leave private residue and log fixed phase+errno only. Daemon VoxPrivateFiles policy unchanged.
+- Bounds unchanged: input 2,000,000,000 B, copy 64 KiB, two active requests, response 4 MiB/result 8 MiB. Cancel own Task; no vendor billing/retention cancellation guarantee.
+- Real public-consumer iOS sandbox/HTTP regression: examples/annotation-sandbox + scripts/test-ios-annotation.py (CI-only, owned ephemeral Simulator; no operator installation, paid call or model load). Report: reports/annotation-sandbox-staging-2026-10-31.md.
+
 ## Known gaps
 
 - `VoxDictation` covers dictation only; `VoxAppleSpeech` is separate playback

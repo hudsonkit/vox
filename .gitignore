@@ -25,3 +25,6 @@ apps/*/.swiftpm
 THREAD_HANDOFF.md
 # OpenScout local state
 .openscout/project.json
+# Generated, ephemeral iOS annotation consumer project/configuration
+examples/annotation-sandbox/AnnotationSandbox.xcodeproj/
+examples/annotation-sandbox/Generated/

@@ -6,13 +6,14 @@ import VoxCore
 struct AnnotationUploadFile: Sendable {
     static let maxInputBytes = 2_000_000_000
     let url: URL
-    let directory: URL
+    private let staging: AnnotationStagingFile
+    var directory: URL { staging.directory }
     let inputBytes: Int
     let duration: Double?
     let fileCheckMs: Int
     let audioLoadMs: Int
     let audioPrepareMs: Int
-    func remove() { try? FileManager.default.removeItem(at: directory) }
+    func remove() { staging.remove() }
 
     private final class Cancellation: @unchecked Sendable {
         let lock = NSLock(); var cancelled = false
@@ -58,24 +59,12 @@ struct AnnotationUploadFile: Sendable {
         }
         let loadMs = Int(Date().timeIntervalSince(loadStart) * 1000)
         let prepareStart = Date()
-        // Foundation can retain the macOS /var symlink in temporaryDirectory even
-        // after resolvingSymlinksInPath. Resolve with POSIX before the no-follow walk.
-        guard let resolved = realpath(FileManager.default.temporaryDirectory.path, nil) else {
-            throw RemoteAnnotationError.invalidFile
-        }
-        let temporaryRoot = String(cString: resolved)
-        free(resolved)
-        let directory = URL(fileURLWithPath: temporaryRoot, isDirectory: true)
-            .appendingPathComponent("vox-annotation-" + UUID().uuidString, isDirectory: true)
-        try VoxPrivateFiles.prepareDirectory(directory)
+        let staging = try AnnotationStagingFile.create()
         var keep = false
-        defer { if !keep { try? FileManager.default.removeItem(at: directory) } }
-        let target = directory.appendingPathComponent("upload.bin")
-        let outputFD = open(target.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
-        guard outputFD >= 0 else { throw RemoteAnnotationError.invalidFile }
+        defer { if !keep { staging.remove() } }
+        let outputFD = try staging.openOutput()
         let output = FileHandle(fileDescriptor: outputFD, closeOnDealloc: true)
         defer { try? output.close() }
-        guard fchmod(outputFD, 0o600) == 0 else { throw RemoteAnnotationError.invalidFile }
         if let fields {
             for (name, value) in fields {
                 try output.write(contentsOf: Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(name)\"\r\n\r\n\(value)\r\n".utf8))
@@ -99,7 +88,7 @@ struct AnnotationUploadFile: Sendable {
         if fields != nil { try output.write(contentsOf: Data("\r\n--\(boundary)--\r\n".utf8)) }
         try cancellation.check()
         keep = true
-        return Self(url: target, directory: directory, inputBytes: copied, duration: duration,
+        return Self(url: staging.url, staging: staging, inputBytes: copied, duration: duration,
                     fileCheckMs: fileCheckMs, audioLoadMs: loadMs, audioPrepareMs: Int(Date().timeIntervalSince(prepareStart) * 1000))
     }
 }

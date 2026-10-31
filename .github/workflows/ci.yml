@@ -43,6 +43,15 @@ jobs:
         env:
           LIBDISPATCH_COOPERATIVE_POOL_STRICT: '1'
         run: xcrun swift test --package-path swift --skip-build --filter 'StdioTransportTests|Readout|NativeStreamingASRTests'
+  annotation-ios:
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - name: Ensure XcodeGen is available for the isolated consumer
+        run: command -v xcodegen >/dev/null || brew install xcodegen
+      - name: Real iOS app-sandbox annotation with loopback vendors
+        run: python3 scripts/test-ios-annotation.py
   clients-and-docs:
     runs-on: ubuntu-latest
     steps:

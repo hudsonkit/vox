@@ -983,6 +983,39 @@ ignored controls. Do not parse localized error text to classify unsupported opti
 the initial `start` return. No generated-audio pitch shift, word alignment or
 provider synthesis pitch/volume parameter is fabricated by this output API.
 
+## Embedded cloud annotation and sandbox staging
+
+Use `AnnotationManager()` or `RemoteAnnotationProvider` through `VoxEngine` for
+explicit file uploads with request-scoped keys:
+
+```swift
+let result = try await AnnotationManager().annotate(request: AnnotationRequest(
+    url: finalizedFileURL, modelId: "elevenlabs:scribe_v2",
+    providerCredentials: ["ELEVENLABS_API_KEY": selectedKey],
+    diarize: true, tagAudioEvents: true
+))
+```
+
+The caller owns readable finalized media and any security-scoped access to external
+files. Vox owns staging and cleanup inside the OS temporary-directory grant.
+No private cache paths, directory overrides, daemon capability writer, global
+credential mutation or vendor client is required in the app. Production staging
+opens that existing grant directly, creates only a random private 0700 leaf and
+exclusive 0600 file, and never walks/creates/chmods filesystem ancestors. The
+stricter `VoxPrivateFiles` helper remains for daemon capabilities, unchanged.
+
+Input remains bounded to 2,000,000,000 bytes, copied in 64 KiB chunks. Two active
+uploads, 4 MiB response and 8 MiB result limits still apply. Request cancellation
+closes only its HTTP task and removes owned temporary staging; vendor work/billing
+cannot be undone. Cleanup is descriptor-relative, idempotent and nonrecursive;
+filesystem errors can leave a private residual leaf and produce a phase/errno
+warning without printing paths, media, credentials or vendor descriptions.
+
+The [sandbox consumer](../examples/annotation-sandbox/README.md) runs actual public
+API uploads in an ephemeral CI iOS app sandbox against a loopback server, rather
+than proving only native-module compilation. No operator app/device is installed
+or changed for that verification. See the [staging investigation](./reports/annotation-sandbox-staging-2026-10-31.md).
+
 ## Warm-up
 
 Warm-up must remain explicit.
@@ -1252,7 +1285,11 @@ exposes `listAnnotationModels()` and `annotateFile(path, options)` with an expli
   than inventing zero or using the last word's end.
 - Vox limits input to 2,000,000,000 bytes and two active annotation requests. An
   additional request errors busy. Upload preparation copies in 64 KiB chunks to an
-  owner-only temporary file, removed on completion/error/cancellation. No upload
+  owner-only temporary file. Annotation opens the OS-provided temporary-directory
+  grant directly, then creates only its own random 0700 leaf and exclusive 0600
+  payload, with descriptor-relative cleanup on completion/error/cancellation.
+  It does not walk/create/chmod ancestors from filesystem root. The daemon's
+  stricter capability-path helper and privacy checks are unchanged. No upload
   or response cache is kept. Successful performance samples contain routing and
   stage metrics, not keys, media, transcript text or vendor responses.
 - HTTP responses are bounded to 4 MiB and encoded results to 8 MiB. Excess fails
@@ -3703,6 +3740,14 @@ Source: docs/agent/apple-embed.agent.md
 - synthesis identity is separate from the physical audio-output route
 - do not put reply dedupe, markdown flattening, fallback copy, preference storage, queue priority, or telemetry double-recording in this controller
 
+## Embedded cloud annotation
+
+- AnnotationManager()/RemoteAnnotationProvider are public VoxEngine file-upload surfaces on iOS; explicit elevenlabs:scribe_v2 or deepgram:nova-3, per-request providerCredentials, no ambient annotation key fallback.
+- App owns finalized readable input/security-scoped external access; Vox owns temp staging. Do not copy private staging paths or call capability helpers in the app.
+- Staging opens existing OS temp grant directly; random 0700 leaf/exclusive 0600 payload, no filesystem-root ancestor traversal/create/chmod. Descriptor cleanup is nonrecursive/idempotent; failures can leave private residue and log fixed phase+errno only. Daemon VoxPrivateFiles policy unchanged.
+- Bounds unchanged: input 2,000,000,000 B, copy 64 KiB, two active requests, response 4 MiB/result 8 MiB. Cancel own Task; no vendor billing/retention cancellation guarantee.
+- Real public-consumer iOS sandbox/HTTP regression: examples/annotation-sandbox + scripts/test-ios-annotation.py (CI-only, owned ephemeral Simulator; no operator installation, paid call or model load). Report: reports/annotation-sandbox-staging-2026-10-31.md.
+
 ## Known gaps
 
 - `VoxDictation` covers dictation only; `VoxAppleSpeech` is separate playback
@@ -4040,6 +4085,7 @@ Source: docs/agent/runtime.agent.md
 - `diarize` defaults true. Scribe events default true; numSpeakers 1–32 requires diarize. Deepgram events/count hints error before upload. Optional languageCode is not echoed as detected language. Cloud providers reject text/words alignment hints.
 - Words have nullable confidence/logProbability/speakerConfidence. Scribe preserves logprob, no exponentiation; Deepgram preserves scores. Scribe speaker IDs unchanged; Deepgram integers become decimal strings. Missing times error. Events separate from speech; spacing ignored.
 - Scribe speaker spans: word-span-derived; Deepgram: vendor-utterances else word-span-derived. No invented aggregate confidence or acoustic VAD. Duration vendor else actual media metadata, source explicit, otherwise error. No fake vendor IDs/language. unsupportedFields vs unavailableFields distinguish limits from missing response evidence.
+- Staging uses the OS temporary-directory grant directly, a random 0700 leaf/exclusive 0600 payload and descriptor-relative cleanup, not the filesystem-root capability writer. VoxPrivateFiles capability policy unchanged. CI runs a real hosted iOS consumer with loopback HTTP (examples/annotation-sandbox); not compilation-only.
 - Two active uploads maximum; overflow errors busy. Input <=2,000,000,000 B, disk-streamed in 64 KiB chunks to 0700 dir/0600 file then removed. Response <=4 MiB, result <=8 MiB. Ephemeral HTTP, no caches/cookies/auth storage, no redirects/application retries. HTTP errors expose status only. Vendor retention, accuracy and account access unverified.
 - Host-only complete endpoint overrides `VOX_ANNOTATION_ELEVENLABS_URL` / `VOX_ANNOTATION_DEEPGRAM_URL`: HTTPS or loopback HTTP, no query/fragment/userinfo. Invalid override fails closed. Never client-controlled.
 - Integration: `xcrun swift build --package-path swift --product voxd`; `python3 scripts/test-private-annotation.py`. Isolated private daemon, two model-free clients, loopback fixtures only. No paid calls or installed runtime changes. Native ASR unaffected.
