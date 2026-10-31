@@ -1,9 +1,10 @@
 import Foundation
 import VoxCore
 
-/// Instrument public Core ML load/plan phases separately. Never include URL paths,
+/// Instrument Core ML load/plan phases and chunk-correlated prediction phases. Never include URL paths,
 /// request audio/text, credentials or untrusted underlying error descriptions.
 struct ASRLoadStage {
+    enum Kind: String, Sendable { case load, prediction }
     /// Domain names are allowlisted, not reflected. Error userInfo/descriptions can
     /// contain model paths, input text or credentials and must never enter logs.
     struct Failure: Sendable, Equatable {
@@ -33,25 +34,33 @@ struct ASRLoadStage {
         let attempt: Int
         let elapsedMs: Int
         var failures: [Failure] = []
+        var kind: Kind = .load
+        var spanId: UUID? = nil
     }
 
     private let modelId: String
     private let component: String
     private let phase: String
     private let attempt: Int
+    private let kind: Kind
+    private let spanId: UUID?
     private let started = ContinuousClock.now
     private let observe: @Sendable (Event) -> Void
 
     init(
         modelId: String, component: String, phase: String, attempt: Int = 1,
+        kind: Kind = .load, spanId: UUID? = nil,
         observe: @escaping @Sendable (Event) -> Void = ASRLoadStage.log
     ) {
         self.modelId = modelId
         self.component = component
         self.phase = phase
         self.attempt = attempt
+        self.kind = kind
+        self.spanId = spanId
         self.observe = observe
-        observe(Event(modelId: modelId, component: component, phase: phase, state: "started", attempt: attempt, elapsedMs: 0))
+        observe(Event(modelId: modelId, component: component, phase: phase, state: "started", attempt: attempt, elapsedMs: 0,
+                      kind: kind, spanId: spanId))
     }
 
     func sync<T>(_ body: () throws -> T) rethrows -> T {
@@ -80,13 +89,13 @@ struct ASRLoadStage {
         let elapsed = started.duration(to: .now).components
         let ms = Int(elapsed.seconds) * 1000 + Int(elapsed.attoseconds / 1_000_000_000_000_000)
         observe(Event(modelId: modelId, component: component, phase: phase, state: state, attempt: attempt, elapsedMs: ms,
-                      failures: error.map(Failure.summarize) ?? []))
+                      failures: error.map(Failure.summarize) ?? [], kind: kind, spanId: spanId))
     }
 
     private static func log(_ event: Event) {
-        VoxLog.engine.info("CoreML load stage model=\(event.modelId) component=\(event.component) phase=\(event.phase) state=\(event.state) attempt=\(event.attempt) elapsedMs=\(event.elapsedMs)")
+        VoxLog.engine.info("CoreML \(event.kind.rawValue) stage model=\(event.modelId) component=\(event.component) phase=\(event.phase) state=\(event.state) attempt=\(event.attempt) elapsedMs=\(event.elapsedMs) spanId=\(event.spanId?.uuidString ?? "none")")
         for (depth, failure) in event.failures.enumerated() {
-            VoxLog.engine.info("CoreML stage failure model=\(event.modelId) component=\(event.component) phase=\(event.phase) attempt=\(event.attempt) depth=\(depth) errorDomain=\(failure.domain) errorCode=\(failure.code)")
+            VoxLog.engine.info("CoreML stage failure model=\(event.modelId) component=\(event.component) phase=\(event.phase) attempt=\(event.attempt) depth=\(depth) errorDomain=\(failure.domain) errorCode=\(failure.code) kind=\(event.kind.rawValue) spanId=\(event.spanId?.uuidString ?? "none")")
         }
     }
 }

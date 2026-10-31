@@ -114,3 +114,23 @@ Build `vox-asr-bench` with `swift build --package-path swift -c release --produc
 The JSON report separates preload and priming from dictation. It reports process `phys_footprint` in decimal MB, per-chunk latency, input-audio time at the first partial, unpaced compute time to that partial, and the encoder's compute-plan placement. Add `--paced` to feed capture packets in real time and measure wall-clock first-partial latency. Unpaced compute time is not user-perceived latency. WER scoring lowercases text and removes punctuation; it does not normalize abbreviations or number spellings.
 
 These measurements exclude other processes and system-wide accelerator memory. Compare candidates on the same audio, host, and build configuration. A small smoke corpus is not a production accuracy evaluation.
+
+### Native preparation stage diagnostics
+
+`CoreML load stage` records model ID, component, phase, state, attempt and elapsed
+milliseconds. Load and compute-plan are separate phases. Failures record at most
+three allowlisted NSError domains/numeric codes, never arbitrary domains, raw
+descriptions, paths, feature values or request text.
+
+Parakeet also emits `CoreML prediction stage` for preprocessor prediction, encoder
+prediction and aggregate decoder/joint decoding. An opaque `spanId` groups those
+three phases for one chunk across parallel workers, including preparation's
+silence chunks. These elapsed times include framework queueing and any first-use
+specialization. They are not hardware execution counters. Concurrent chunk times
+must not be summed as wall-clock preparation time. No audio, tokens or vocabulary
+values enter these diagnostics. Stage logs do not change concurrency, placement,
+model configuration, warmup or idle eviction.
+
+The [normal dev-host reload report](reports/native-dev-reload-2026-10-31.md)
+distinguishes controlled successes from the still-open normal-Agent reliability
+gate. Green CI does not close that native gate.

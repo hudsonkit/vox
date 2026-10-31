@@ -133,6 +133,49 @@ system can remove them under storage pressure. This is a plausible contributor,
 not proof of the failure above. See [Core ML performance analysis](https://developer.apple.com/documentation/coreml/analyzing-a-core-ml-model-s-performance-in-xcode)
 and [Improve Core ML integration with async prediction](https://developer.apple.com/videos/play/wwdc2023/10049/).
 
+## Later normal-Agent observation on e040eb1
+
+The peer replaced only its owned dev copy with `e040eb1`; this Vox investigation
+did not stop or replace it. The copied daemon hash was
+`d8070ceb084cfa6ae03502286e6814543da7ec31fe8f0b963bf38912371971f6`.
+After a real idle eviction at 16:34:08 UTC, the normal Agent's next prepare began
+at 16:34:32. It completed at 16:38:34 and real file inference then took 214 ms.
+Preparation's component times were:
+
+| Component | Time |
+|---|---:|
+| CPU preprocessor model-load | 19.858 s |
+| Encoder model-load | 705 ms |
+| Encoder compute-plan | 81.097 s |
+| Decoder / joint model-load | 169 / 93 ms |
+| Prime | 139.549 s |
+
+The plan admission snapshot had 11,643,252,736 free bytes and pressure level 2.
+Priming began with 11,173,330,944 free bytes and pressure level 1. Planned placement
+remained 1379 ANE / 6 CPU operations, 342 ANE / 0 CPU compute. The request completed
+without an error, but approximately four minutes of post-idle preparation is not
+a reliable fast-reload result. **The earlier normal-Agent failure and Gate 2
+remain open.** More free space did not by itself restore fast plan/prime behavior.
+
+A read-only sample of the same hash-verified dev daemon during its first prime
+showed three concurrent async prediction stacks creating execution operations.
+One entered on-device compilation, then `MILCompilerForANE` and ANE `compileModel`
+XPC; others waited on the program-library queue. Physical footprint and lifetime
+peak were both 94.8M at that sample. This is actual ANE compilation during
+prediction, not evidence of CPU inference fallback. The generic method name
+`forceRespecialization` does not establish that its boolean argument was true.
+
+The exact process's unified log also showed three private E5RT `(13)` errors at
+each prime start. The message is redacted and its code is not established as
+POSIX EACCES. No lower-level cause is inferred from that number.
+
+New chunk-correlated preprocessor/encoder/decoder-joint prediction diagnostics
+separate those API costs without changing concurrency or compiler configuration.
+They have model-free tests but have not yet been exercised in a coordinated new
+native run. A separate Core-ML-only existing-encoder isolation probe was compiled
+privately, with explicit release/weak-reference checks and no automatic replay.
+It has not loaded a model; the peer retains the native resource window.
+
 ## Implemented safeguards, not a cache workaround
 
 - Failed Parakeet priming now throws instead of reporting ready. Temporary loaded

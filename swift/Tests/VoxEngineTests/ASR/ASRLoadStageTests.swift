@@ -64,4 +64,26 @@ struct ASRLoadStageTests {
         let deeper = NSError(domain: NSCocoaErrorDomain, code: 1, userInfo: [NSUnderlyingErrorKey: error])
         #expect(ASRLoadStage.Failure.summarize(deeper).count == 3)
     }
+
+    @Test("Prediction spans stay distinct from load stages and correlate each chunk without input data")
+    func predictionSpans() async throws {
+        let events = LoadEvents()
+        let chunk = UUID()
+        let otherChunk = UUID()
+        let value = try await ASRLoadStage(
+            modelId: "parakeet:v3", component: "encoder", phase: "prediction",
+            kind: .prediction, spanId: chunk, observe: events.append
+        ).measureAsync { try await Task.sleep(for: .milliseconds(1)); return 42 }
+        #expect(value == 42)
+        do {
+            _ = try ASRLoadStage(
+                modelId: "parakeet:v3", component: "decoder-joint", phase: "decode",
+                kind: .prediction, spanId: otherChunk, observe: events.append
+            ).sync { throw Failure.fixture }
+        } catch {}
+        #expect(events.value.map(\.kind) == [.prediction, .prediction, .prediction, .prediction])
+        #expect(events.value.map(\.spanId) == [chunk, chunk, otherChunk, otherChunk])
+        #expect(events.value.map(\.state) == ["started", "completed", "started", "failed"])
+        #expect(events.value.map(\.component) == ["encoder", "encoder", "decoder-joint", "decoder-joint"])
+    }
 }

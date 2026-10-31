@@ -3019,6 +3019,26 @@ The JSON report separates preload and priming from dictation. It reports process
 
 These measurements exclude other processes and system-wide accelerator memory. Compare candidates on the same audio, host, and build configuration. A small smoke corpus is not a production accuracy evaluation.
 
+### Native preparation stage diagnostics
+
+`CoreML load stage` records model ID, component, phase, state, attempt and elapsed
+milliseconds. Load and compute-plan are separate phases. Failures record at most
+three allowlisted NSError domains/numeric codes, never arbitrary domains, raw
+descriptions, paths, feature values or request text.
+
+Parakeet also emits `CoreML prediction stage` for preprocessor prediction, encoder
+prediction and aggregate decoder/joint decoding. An opaque `spanId` groups those
+three phases for one chunk across parallel workers, including preparation's
+silence chunks. These elapsed times include framework queueing and any first-use
+specialization. They are not hardware execution counters. Concurrent chunk times
+must not be summed as wall-clock preparation time. No audio, tokens or vocabulary
+values enter these diagnostics. Stage logs do not change concurrency, placement,
+model configuration, warmup or idle eviction.
+
+The [normal dev-host reload report](reports/native-dev-reload-2026-10-31.md)
+distinguishes controlled successes from the still-open normal-Agent reliability
+gate. Green CI does not close that native gate.
+
 # Architecture
 
 Source: /docs/architecture
@@ -3919,6 +3939,9 @@ Source: docs/agent/observability.agent.md
 - `vox-asr-bench` (Swift executable) reports physical process footprint, per-chunk latency, first partial by input-audio time and unpaced compute time, planned placement, and normalized WER when references exist.
 - Benchmark takes model id, explicit streaming model directory (batch uses installed VOX_HOME cache), and a mono 16 kHz WAV or a directory of WAV + matching .txt references. Use `--paced` for wall-clock first-partial latency.
 - Run a release build; distinguish cold preload/ANE compile time from warm inference, and process footprint from system-wide accelerator memory.
+
+- Native diagnostics distinguish CoreML load stage (component model-load/compute-plan) and prediction stage (Parakeet preprocessor, encoder, aggregate decoder-joint). Opaque spanId groups one chunk across workers; includes queue/specialization time, not hardware counters; never sum concurrent spans as wall time. No audio/tokens/paths/raw errors. Numeric error chains max3 allowlisted domains. No concurrency/configuration/placement/eviction changes.
+- Gate evidence: reports/native-dev-reload-2026-10-31.md. Controlled post-unload inference successes do not close the normal-Agent plan-failure/slow-prime gate; green CI is not native acceptance.
 
 # Vox Facts
 
