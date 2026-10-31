@@ -2838,6 +2838,21 @@ The JSON report separates preload and priming from dictation. It reports process
 
 These measurements exclude other processes and system-wide accelerator memory. Compare candidates on the same audio, host, and build configuration. A small smoke corpus is not a production accuracy evaluation.
 
+### Private Parakeet reload comparison
+
+`scripts/probe-parakeet-reload.py` supervises an opt-in production-runtime test of
+fresh-process preparation, resident reuse, explicit unload and reload using an
+existing pinned v3 bundle and generated silence. It records component logs,
+physical footprint/lifetime peak, placement, disk and kernel memory pressure.
+It does not install models or launch an app/daemon. Ordinary Swift tests skip it.
+
+The experiment requires at least 5 GiB free disk and normal pressure before launch,
+and rechecks the disk reserve before each nonresident load. It stops only its
+verified owned caller at the resource/deadline limit; it never deletes caches or
+signals the OS compiler. This reserve is an experiment policy, not a measured
+Core ML minimum. See the [resource-pressure report](./reports/parakeet-reload-resource-pressure-2026-10-31.md)
+for the command, partial results and unresolved cache-reuse question.
+
 # Architecture
 
 Source: /docs/architecture
@@ -3721,6 +3736,10 @@ Source: docs/agent/observability.agent.md
 - `vox-asr-bench` (Swift executable) reports physical process footprint, per-chunk latency, first partial by input-audio time and unpaced compute time, planned placement, and normalized WER when references exist.
 - Benchmark takes model id, explicit streaming model directory (batch uses installed VOX_HOME cache), and a mono 16 kHz WAV or a directory of WAV + matching .txt references. Use `--paced` for wall-clock first-partial latency.
 - Run a release build; distinguish cold preload/ANE compile time from warm inference, and process footprint from system-wide accelerator memory.
+- Private reload diagnostic: `scripts/probe-parakeet-reload.py --model-directory "$EXISTING_PARAKEET_V3_BUNDLE" --output "$NEW_PRIVATE_RUN_DIRECTORY"`. Build `ParakeetReloadHardwareProbe` first; ordinary tests skip hardware execution.
+- Probe uses the production runtime, existing pinned model and generated silence; no downloads, daemon/app launch or cache deletion. Requires 5 GiB start/nonresident-load reserve and normal initial pressure; reserve is experiment policy, not a Core ML minimum.
+- Probe records fresh/reuse/unload/reload, placement, component logs, footprint/lifetime peak and host resources; skipped/blocked phases are not successful reload measurements. Verify helper parent plus mapped checkout bundle before sampling/signalling; never signal the OS compiler.
+- Resource-pressure report: `docs/reports/parakeet-reload-resource-pressure-2026-10-31.md`. Historical ENOSPC is confirmed, specialization cache-reuse cause and post-idle reload remain unresolved.
 
 # Vox Facts
 

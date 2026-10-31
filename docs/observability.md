@@ -114,3 +114,18 @@ Build `vox-asr-bench` with `swift build --package-path swift -c release --produc
 The JSON report separates preload and priming from dictation. It reports process `phys_footprint` in decimal MB, per-chunk latency, input-audio time at the first partial, unpaced compute time to that partial, and the encoder's compute-plan placement. Add `--paced` to feed capture packets in real time and measure wall-clock first-partial latency. Unpaced compute time is not user-perceived latency. WER scoring lowercases text and removes punctuation; it does not normalize abbreviations or number spellings.
 
 These measurements exclude other processes and system-wide accelerator memory. Compare candidates on the same audio, host, and build configuration. A small smoke corpus is not a production accuracy evaluation.
+
+### Private Parakeet reload comparison
+
+`scripts/probe-parakeet-reload.py` supervises an opt-in production-runtime test of
+fresh-process preparation, resident reuse, explicit unload and reload using an
+existing pinned v3 bundle and generated silence. It records component logs,
+physical footprint/lifetime peak, placement, disk and kernel memory pressure.
+It does not install models or launch an app/daemon. Ordinary Swift tests skip it.
+
+The experiment requires at least 5 GiB free disk and normal pressure before launch,
+and rechecks the disk reserve before each nonresident load. It stops only its
+verified owned caller at the resource/deadline limit; it never deletes caches or
+signals the OS compiler. This reserve is an experiment policy, not a measured
+Core ML minimum. See the [resource-pressure report](./reports/parakeet-reload-resource-pressure-2026-10-31.md)
+for the command, partial results and unresolved cache-reuse question.

@@ -47,4 +47,6 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run --cwd packages/client build
       - run: bun test packages/client/test packages/cli/test packages/web-client/test
+      - name: Hardware probe supervisor ownership is model-free
+        run: python3 -m unittest discover -s scripts/tests -p test_parakeet_reload_probe.py -v
       - run: bun run docs:check
