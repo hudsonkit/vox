@@ -20,6 +20,12 @@ jobs:
       - run: xcrun swift --version
       - name: Root package exports the lightweight Swift client
         run: xcrun swift build --target VoxClient --jobs 3
+      - name: Standalone Core ML cache probe compiles without loading models
+        run: |
+          xcrun swiftc -parse-as-library -swift-version 6 -O \
+            -target "$(uname -m)-apple-macos15.0" \
+            scripts/probe-coreml-cache.swift -o "$RUNNER_TEMP/vox-coreml-cache-probe"
+          "$RUNNER_TEMP/vox-coreml-cache-probe" --describe
       - name: Model-free private dev client compiles
         run: xcrun swift build --package-path examples/dev-host-client --jobs 3
       - name: Public native Parakeet consumer compiles for iOS Simulator

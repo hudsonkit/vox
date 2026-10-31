@@ -134,3 +134,54 @@ model configuration, warmup or idle eviction.
 The [normal dev-host reload report](reports/native-dev-reload-2026-10-31.md)
 distinguishes controlled successes from the still-open normal-Agent reliability
 gate. Green CI does not close that native gate.
+
+### Isolate Core ML cache behavior
+
+`scripts/probe-coreml-cache.swift` isolates public Core ML model/plan loading from
+Vox, ASR prediction and Agent boot. It accepts an existing compiled encoder.
+`model-plan` uses URL factories; `shared-asset` uses one MLModelAsset for model and
+plan within each phase; `plan-only` skips MLModel construction. No mode retains
+models, plans or assets across teardown. Weak references must clear before the
+next model loads. The final phase waits at least the requested interval after
+explicit teardown; this is not the speech runtime's idle timer.
+
+Run only in a coordinated native window on macOS 15+ Apple Silicon, without a
+competing model prepare/build. Use a private new report path and existing model
+files. The probe requires 5 GiB temporary-volume headroom before each API, pressure
+level 1 at launch and no critical pressure thereafter. These are measurement
+safety policies, not guarantees against OS cache eviction. Do not clear model or
+Core ML caches to make a result pass.
+
+```sh
+PRIVATE_DIR="$(mktemp -d)"
+xcrun swiftc -parse-as-library -swift-version 6 -O \
+  -target "$(uname -m)-apple-macos15.0" \
+  scripts/probe-coreml-cache.swift -o "$PRIVATE_DIR/CoreMLCacheProbe"
+"$PRIVATE_DIR/CoreMLCacheProbe" --describe
+# Explicit hardware run; set EXISTING_ENCODER to an installed Encoder.mlmodelc.
+"$PRIVATE_DIR/CoreMLCacheProbe" model-plan "$EXISTING_ENCODER" \
+  "$PRIVATE_DIR/model-plan.json" 60
+```
+
+Reports contain phase timings, physical footprint, placement counts, source-file
+metadata, weak-reference lifetime checks and bounded numeric failures. They contain
+no audio, transcript or plain model path. A cleared MLModel weak reference does
+not prove that OS driver caches are empty. This component probe is not ASR
+inference, accuracy or normal-Agent acceptance. CI compiles it and runs only
+`--describe`, never hardware model loading.
+
+Core ML owns its specialization cache and can evict it under storage pressure.
+Free-disk bytes and kernel memory-pressure level do not prove cache stability.
+Inspect actual cache entries and system purge events when investigating nonreuse.
+For historical unified-log queries, convert Vox's UTC timestamps to the input
+time zone; `log show --timezone UTC` formats output but does not make an ambiguous
+local `--start` string a UTC instant. Relative queries avoid that ambiguity:
+
+```sh
+log show --last 10m --timezone UTC --style compact --info \
+  --predicate 'subsystem CONTAINS[c] "coreml" OR subsystem CONTAINS[c] "cache_delete"'
+```
+
+Keep system logs private. Redacted descriptions and a purge event alone do not
+prove which actor deleted a particular file. See the native reload report for
+measured cache-loss evidence and the remaining gate.

@@ -21,3 +21,6 @@
 
 - Native diagnostics distinguish CoreML load stage (component model-load/compute-plan) and prediction stage (Parakeet preprocessor, encoder, aggregate decoder-joint). Opaque spanId groups one chunk across workers; includes queue/specialization time, not hardware counters; never sum concurrent spans as wall time. No audio/tokens/paths/raw errors. Numeric error chains max3 allowlisted domains. No concurrency/configuration/placement/eviction changes.
 - Gate evidence: reports/native-dev-reload-2026-10-31.md. Controlled post-unload inference successes do not close the normal-Agent plan-failure/slow-prime gate; green CI is not native acceptance.
+
+- Standalone scripts/probe-coreml-cache.swift: model-plan / shared-asset / plan-only, existing encoder only, no predictions/downloads/cache deletion/retries/retained models. macOS15+ANE, 5GiB before APIs, launch pressure1 then noncritical; private new report; weak model/plan/asset teardown. Explicit release+pause is NOT the runtime idle timer. CI --describe only, no hardware acceptance.
+- Storage cache eviction can occur even with gigabytes free and memory pressure1/2. Track entries/purge events; ambiguous log --start strings are local time, --timezone UTC changes output. Keep raw logs private and distinguish correlation from per-file deleter proof.

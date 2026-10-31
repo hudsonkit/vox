@@ -110,10 +110,12 @@ At 16:03:37 UTC, a separately named Talkie-owned copied dev host loaded the
 Parakeet encoder in 470 ms, then failed compute-plan at 16:04:12 after 34.952 s.
 The admission snapshot showed 5,763,313,664 free bytes and pressure level 1. This
 failure occurred before the later prototype below. The client reported `Failed to construct compute plan, internal failure.`
-The old stage logger did not retain numeric error causes. Additional bounded, allowlisted domain/code logging
+The old stage logger did not retain numeric error causes; the later corrected
+unified-log query recovered Core ML code 0 with underlying code 0 (see below). Additional bounded, allowlisted domain/code logging
 now records failures without raw descriptions, paths, bodies or arbitrary domains.
-No retry of that peer request was performed by this lane. A precise underlying
-failure category and a coordinated rerun remain required.
+No retry of that peer request was performed by this lane. The redacted underlying description and original per-file failure cause remain
+unresolved. The later coordinated rerun completed slowly without reproducing
+the error.
 
 A temporary same-MLModelAsset model/plan experiment compiled but showed no benefit
 in a partial, resource-confounded run. It overlapped the separate dev host's later
@@ -176,6 +178,68 @@ native run. A separate Core-ML-only existing-encoder isolation probe was compile
 privately, with explicit release/weak-reference checks and no automatic replay.
 It has not loaded a model; the peer retains the native resource window.
 
+## Standalone isolation and recovered failure category
+
+A separate Core-ML-only executable loaded the same existing encoder and read its
+plan, with no Vox runtime, Agent, decoder, priming, predictions or model download.
+Each phase used `.cpuAndNeuralEngine` and rejected CPU heavy-compute/GPU placement.
+MLModel and MLComputePlan weak references cleared before subsequent loading.
+The pause below is 60 seconds after explicit release, not an ASR idle timer.
+
+| Component run | First model / plan | Immediate explicit reload model / plan | After released pause model / plan |
+|---|---:|---:|---:|
+| URL factories, first executable | 34.884 / 31.966 s | 567 / 273 ms | **31.848 / 33.741 s** |
+| Shared asset within each load, second executable | 35.580 / 34.028 s | 583 / 245 ms | 157 / 483 ms |
+| URL factories, exact same binary as shared-asset row | 38.150 / 50.249 s | 583 / 493 ms | 1049 / 999 ms |
+
+The second run released the asset too; all weak model/plan/asset checks were false
+after teardown. It did not keep a model or asset alive across the pause. The last
+two rows used identical binary bytes and the same cache namespace. Because the
+URL control also reloaded quickly, these observations do not establish a shared-
+asset fix. The first two rows alone are additionally confounded by different
+executable/cache namespaces. No asset prototype is promoted or conclusively ruled
+out. Component results do not establish complete ASR or normal-Agent correctness.
+
+The first run's cold-like re-specialization therefore does not require Vox's
+lifecycle actor, Agent boot or extra prediction streams. Across that run pressure
+stayed at level 1. During its released pause, system CacheDelete reported a
+1,519,890,432-byte filesystem purge at 16:55:11.823 UTC, with urgency 3. Its volume
+snapshot then reported 10,403,840,000 free bytes (initially 8,847,360,000). The
+subsequent model and plan calls took over 65 seconds combined.
+
+Read-only inventory/recheck later found 19 of 26 previously observed files absent
+with ENOENT in the two probe cache namespaces. This investigation did not remove
+or chmod those caches. In the same interval, CacheDelete reported a
+4,728,360,960-byte purge at 17:10:43.658 UTC and continued purging with 9.22 GB
+reported free. This confirms active OS cache reclamation even when a simple
+free-byte/memory-pressure admission check passes. **Per-file deletion attribution
+was not captured**; associating a particular missing entry with one purge remains
+an inference, not proof of the original failure's precise cause.
+
+Correcting the historical log query's local-time/UTC conversion recovered the
+original failure at 16:04:12.931 UTC: `MLE5Engine` failed to retrieve segmentation
+analytics, with Core ML error code **0** and an underlying Core ML code **0**, then
+compute-plan construction failed. Both descriptions were redacted by the system.
+This is not a POSIX error 13, an encoder CPU-fallback finding or a complete
+explanation of why analytics were unavailable. At 16:04:12.939 UTC, only 8 ms
+later, CacheDelete reported a 542,035,968-byte filesystem purge (2,150,400,000 bytes
+measured) at urgency 3. Its reported 0.167486-second duration overlaps the Core ML
+failure. This is strong timing correlation, not a per-file trace proving which
+analytics file was removed. Earlier empty log queries used an
+incorrect time window; absence of those results was not absence of system logs.
+
+A cleaned public component reproducer is now `scripts/probe-coreml-cache.swift`;
+see [the observability procedure](../observability.md#isolate-core-ml-cache-behavior).
+It is based on the measured private probe and adds a pre-load ANE availability
+guard while removing an untested retained-asset mode. The public file has compiled
+and its model-free describe path passed, but has not loaded a model itself.
+
+**No deterministic cache-reuse fix is established.** The next causal comparison
+needs cache-stable conditions or a per-file invalidation trace. The macOS 3 GiB
+admission budget is not such a guarantee. No larger arbitrary disk floor, CPU
+fallback, permanent model/asset retention, cache deletion or disabled idle timer
+was introduced to make the test pass. The normal-Agent gate remains open.
+
 ## Implemented safeguards, not a cache workaround
 
 - Failed Parakeet priming now throws instead of reporting ready. Temporary loaded
@@ -206,8 +270,10 @@ smoke and docs checks passed. Public CI for `9260f97` passed in run
 unknown / POSIX ENOSPC chain and verify that secret descriptions/domains do not
 enter events. These tests require no model or vendor call.
 
-The remaining gate is a coordinated normal dev Agent post-idle rerun with the
-underlying compute-plan failure recorded, followed by operator own-voice acceptance.
+The remaining gate is reliable normal dev-Agent post-idle preparation under
+identified cache conditions, followed by operator own-voice acceptance. The
+coordinated e040eb1 rerun completed, but took 241.807 seconds; the historical
+failure category was subsequently recovered from system logs.
 The named daemon used for the controlled tables was stopped after measurement.
 The peer's separate dev daemon/Agent and all installed services/apps were left
 untouched. No main merge, release or installed-app overwrite was performed.
