@@ -153,6 +153,7 @@ export interface AttributedWordTiming {
   end: number;
   confidence: number | null;
   speakerId?: string | null;
+  language?: string | null;
   logProbability?: number | null;
   speakerConfidence?: number | null;
 }

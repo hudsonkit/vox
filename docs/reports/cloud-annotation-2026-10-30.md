@@ -49,7 +49,7 @@ No paid endpoints or real account credentials are used.
 
 The private fixture observes exactly seven expected uploads. Core/provider tests
 also cover malformed/missing intervals, unknown token types, score nullability,
-header-injection rejection, bounded responses, invalid JSON, credential allowlists,
+header-injection rejection, bounded responses, invalid JSON, multilingual alternative/word language evidence, credential allowlists,
 service forwarding/telemetry and reserve/attach/disconnect ownership races.
 
 ## Limits
@@ -77,7 +77,7 @@ result and credential semantics. Vendor source shapes:
 
 ## Local checks
 
-- Full nested Swift suite: 252 Swift Testing cases pass, plus XCTest suites.
+- Full nested Swift suite: 253 Swift Testing cases pass, plus XCTest suites.
 - Bun clients/CLI/browser suites: 61 pass, 8 opt-in integration skips.
 - Strict cooperative executor: annotation, task ownership and provider transport
   tests pass. Root `VoxClient` and iOS simulator `VoxClient` compile without engines.

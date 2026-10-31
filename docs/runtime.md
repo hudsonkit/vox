@@ -118,6 +118,9 @@ exposes `listAnnotationModels()` and `annotateFile(path, options)` with an expli
   `speakerSegmentsSource` distinguishes `vendor-utterances` and `word-span-derived`.
   Derived spans have no invented confidence; utterance transcription confidence
   is not speaker confidence. These spans are not acoustic VAD or speaker identity.
+- Deepgram multilingual `languages` come from the selected alternative; per-word
+  `words.language` is preserved when supplied. Vox never substitutes the first
+  language for an absent detected-language field.
 - `language`, `languageConfidence`, `languages`, `providerRequestId` and
   `providerModelIds` preserve vendor evidence. Missing IDs stay null/empty, not
   locally generated vendor identifiers. `unsupportedFields` names provider limits;
@@ -150,7 +153,8 @@ overrides fail closed. Clients cannot set these endpoints over RPC. A host owner
 who overrides an endpoint controls where that provider's request key is sent.
 
 Contract sources: [Scribe conversion API](https://elevenlabs.io/docs/api-reference/speech-to-text/convert)
-and [Deepgram prerecorded API](https://developers.deepgram.com/reference/speech-to-text/listen-pre-recorded).
+and [Deepgram prerecorded API](https://developers.deepgram.com/reference/speech-to-text/listen-pre-recorded),
+including [Nova-3 multilingual response fields](https://developers.deepgram.com/docs/nova-3-language-prompting).
 Fixture tests validate routing and schema preservation, not paid-account access,
 real audio accuracy, vendor retention or production vendor availability.
 

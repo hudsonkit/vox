@@ -330,6 +330,7 @@ public struct AttributedWordTiming: Codable, Sendable, Equatable {
     public let logProbability: Double?
     public let speakerConfidence: Float?
     public let speakerId: String?
+    public let language: String?
 
     public init(
         word: String,
@@ -338,13 +339,14 @@ public struct AttributedWordTiming: Codable, Sendable, Equatable {
         confidence: Float? = nil,
         speakerId: String? = nil,
         logProbability: Double? = nil,
-        speakerConfidence: Float? = nil
+        speakerConfidence: Float? = nil, language: String? = nil
     ) {
         self.word = word
         self.start = start
         self.end = end
         self.confidence = confidence
         self.speakerId = speakerId
+        self.language = language
         self.logProbability = logProbability
         self.speakerConfidence = speakerConfidence
     }
@@ -355,6 +357,7 @@ public struct AttributedWordTiming: Codable, Sendable, Equatable {
         self.end = wordTiming.end
         self.confidence = wordTiming.confidence
         self.speakerId = speakerId
+        self.language = nil
         self.logProbability = nil
         self.speakerConfidence = nil
     }
@@ -367,6 +370,7 @@ public struct AttributedWordTiming: Codable, Sendable, Equatable {
             "confidence": confidence ?? NSNull(),
             "logProbability": logProbability ?? NSNull(),
             "speakerConfidence": speakerConfidence ?? NSNull(),
+            "language": language ?? NSNull(),
             "speakerId": speakerId ?? NSNull()
         ]
     }

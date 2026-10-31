@@ -107,8 +107,8 @@ describe("parseAttributedWordTimings", () => {
         { word: "" },
       ]),
     ).toEqual([
-      { word: "hello", start: 0.01, end: 0.2, confidence: 0.98, logProbability: null, speakerConfidence: null, speakerId: "speaker-0" },
-      { word: "world", start: 0.21, end: 0.4, confidence: 0.91, logProbability: null, speakerConfidence: null, speakerId: null },
+      { word: "hello", start: 0.01, end: 0.2, confidence: 0.98, logProbability: null, speakerConfidence: null, language: null, speakerId: "speaker-0" },
+      { word: "world", start: 0.21, end: 0.4, confidence: 0.91, logProbability: null, speakerConfidence: null, language: null, speakerId: null },
     ]);
   });
 });

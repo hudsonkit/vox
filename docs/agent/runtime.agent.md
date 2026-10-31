@@ -81,3 +81,5 @@
 - Two active uploads maximum; overflow errors busy. Input <=2,000,000,000 B, disk-streamed in 64 KiB chunks to 0700 dir/0600 file then removed. Response <=4 MiB, result <=8 MiB. Ephemeral HTTP, no caches/cookies/auth storage, no redirects/application retries. HTTP errors expose status only. Vendor retention, accuracy and account access unverified.
 - Host-only complete endpoint overrides `VOX_ANNOTATION_ELEVENLABS_URL` / `VOX_ANNOTATION_DEEPGRAM_URL`: HTTPS or loopback HTTP, no query/fragment/userinfo. Invalid override fails closed. Never client-controlled.
 - Integration: `xcrun swift build --package-path swift --product voxd`; `python3 scripts/test-private-annotation.py`. Isolated private daemon, two model-free clients, loopback fixtures only. No paid calls or installed runtime changes. Native ASR unaffected.
+
+- Deepgram multilingual languages live on the selected alternative; preserve its list plus per-word words.language. Do not infer detected language from the list. Scribe per-word language is unsupported.

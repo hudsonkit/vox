@@ -75,7 +75,7 @@ struct AnnotationResponseParser {
         result.duration = try duration(root.metadata?.duration); result.requestId = root.metadata?.request_id
         result.modelIds = root.metadata?.models ?? []
         result.language = channel.detected_language
-        result.languages = channel.languages ?? channel.detected_language.map { [$0] } ?? []
+        result.languages = alternative.languages ?? channel.languages ?? channel.detected_language.map { [$0] } ?? []
         let utterances = root.results.utterances ?? []
         let utteranceWords = utterances.flatMap { $0.words ?? [] }
         // Channel words are the canonical full transcript. Partial utterance detail
@@ -87,7 +87,7 @@ struct AnnotationResponseParser {
             if let speaker = token.speaker, speaker < 0 { throw RemoteAnnotationError.invalidResponse }
             result.words.append(AttributedWordTiming(word: token.punctuated_word ?? token.word, start: start, end: end,
                 confidence: try probability(token.confidence), speakerId: diarize ? token.speaker.map(String.init) : nil,
-                speakerConfidence: diarize ? try probability(token.speaker_confidence) : nil))
+                speakerConfidence: diarize ? try probability(token.speaker_confidence) : nil, language: token.language))
         }
         if diarize {
             for utterance in utterances {
@@ -105,6 +105,7 @@ struct AnnotationResponseParser {
             }
         }
         if result.language == nil { result.unavailable.append("language") }
+        if result.words.contains(where: { $0.language == nil }) { result.unavailable.append("words.language") }
         if result.words.contains(where: { $0.confidence == nil }) { result.unavailable.append("words.confidence") }
         if diarize && result.words.contains(where: { $0.speakerId == nil }) { result.unavailable.append("words.speakerId") }
         if diarize && result.words.contains(where: { $0.speakerConfidence == nil }) { result.unavailable.append("words.speakerConfidence") }
@@ -139,10 +140,10 @@ struct AnnotationResponseParser {
     private struct Metadata: Decodable { let request_id: String?; let duration: Double?; let models: [String]? }
     private struct Results: Decodable { let channels: [Channel]; let utterances: [Utterance]? }
     private struct Channel: Decodable { let alternatives: [Alternative]; let detected_language: String?; let languages: [String]? }
-    private struct Alternative: Decodable { let transcript: String; let words: [DGWord] }
+    private struct Alternative: Decodable { let transcript: String; let words: [DGWord]; let languages: [String]? }
     private struct DGWord: Decodable {
         let word: String; let punctuated_word: String?; let start: Double?; let end: Double?
-        let confidence: Double?; let speaker: Int?; let speaker_confidence: Double?
+        let confidence: Double?; let speaker: Int?; let speaker_confidence: Double?; let language: String?
     }
     private struct Utterance: Decodable {
         let start: Double?; let end: Double?; let speaker: Int?; let speaker_confidence: Double?; let words: [DGWord]?

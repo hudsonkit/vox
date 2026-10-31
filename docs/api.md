@@ -250,6 +250,7 @@ interface AttributedWordTiming {
   confidence: number | null;
   logProbability?: number | null;
   speakerConfidence?: number | null;
+  language?: string | null;
   speakerId?: string | null;
 }
 

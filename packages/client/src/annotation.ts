@@ -14,6 +14,7 @@ export function parseAttributedWordTimings(value: unknown): AttributedWordTiming
       start: Number(fields.start ?? 0),
       end: Number(fields.end ?? 0),
       confidence: optionalScore(fields.confidence),
+      language: typeof fields.language === "string" ? fields.language : null,
       logProbability: optionalLogProbability(fields.logProbability),
       speakerConfidence: optionalScore(fields.speakerConfidence),
       speakerId:

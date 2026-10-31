@@ -1049,6 +1049,9 @@ exposes `listAnnotationModels()` and `annotateFile(path, options)` with an expli
   `speakerSegmentsSource` distinguishes `vendor-utterances` and `word-span-derived`.
   Derived spans have no invented confidence; utterance transcription confidence
   is not speaker confidence. These spans are not acoustic VAD or speaker identity.
+- Deepgram multilingual `languages` come from the selected alternative; per-word
+  `words.language` is preserved when supplied. Vox never substitutes the first
+  language for an absent detected-language field.
 - `language`, `languageConfidence`, `languages`, `providerRequestId` and
   `providerModelIds` preserve vendor evidence. Missing IDs stay null/empty, not
   locally generated vendor identifiers. `unsupportedFields` names provider limits;
@@ -1081,7 +1084,8 @@ overrides fail closed. Clients cannot set these endpoints over RPC. A host owner
 who overrides an endpoint controls where that provider's request key is sent.
 
 Contract sources: [Scribe conversion API](https://elevenlabs.io/docs/api-reference/speech-to-text/convert)
-and [Deepgram prerecorded API](https://developers.deepgram.com/reference/speech-to-text/listen-pre-recorded).
+and [Deepgram prerecorded API](https://developers.deepgram.com/reference/speech-to-text/listen-pre-recorded),
+including [Nova-3 multilingual response fields](https://developers.deepgram.com/docs/nova-3-language-prompting).
 Fixture tests validate routing and schema preservation, not paid-account access,
 real audio accuracy, vendor retention or production vendor availability.
 
@@ -3036,6 +3040,7 @@ interface AttributedWordTiming {
   confidence: number | null;
   logProbability?: number | null;
   speakerConfidence?: number | null;
+  language?: string | null;
   speakerId?: string | null;
 }
 
@@ -3755,6 +3760,8 @@ Source: docs/agent/runtime.agent.md
 - Two active uploads maximum; overflow errors busy. Input <=2,000,000,000 B, disk-streamed in 64 KiB chunks to 0700 dir/0600 file then removed. Response <=4 MiB, result <=8 MiB. Ephemeral HTTP, no caches/cookies/auth storage, no redirects/application retries. HTTP errors expose status only. Vendor retention, accuracy and account access unverified.
 - Host-only complete endpoint overrides `VOX_ANNOTATION_ELEVENLABS_URL` / `VOX_ANNOTATION_DEEPGRAM_URL`: HTTPS or loopback HTTP, no query/fragment/userinfo. Invalid override fails closed. Never client-controlled.
 - Integration: `xcrun swift build --package-path swift --product voxd`; `python3 scripts/test-private-annotation.py`. Isolated private daemon, two model-free clients, loopback fixtures only. No paid calls or installed runtime changes. Native ASR unaffected.
+
+- Deepgram multilingual languages live on the selected alternative; preserve its list plus per-word words.language. Do not infer detected language from the list. Scribe per-word language is unsupported.
 
 # SDK Facts
 

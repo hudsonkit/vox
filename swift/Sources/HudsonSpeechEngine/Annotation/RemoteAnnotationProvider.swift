@@ -55,9 +55,9 @@ public actor RemoteAnnotationProvider: AnnotationProvider {
             capabilities: ["file": true, "streaming": false, "wordTimestamps": true,
                 "speakerDiarization": true, "wordConfidence": !eleven, "wordLogProbabilities": eleven,
                 "speakerConfidence": !eleven, "audioEvents": eleven, "language": true,
-                "languageConfidence": eleven, "transcriptAlignment": false, "vendorCancellation": false],
+                "languageConfidence": eleven, "wordLanguage": !eleven, "transcriptAlignment": false, "vendorCancellation": false],
             requiresCredentials: [eleven ? "ELEVENLABS_API_KEY" : "DEEPGRAM_API_KEY"],
-            unsupportedFields: eleven ? ["words.confidence", "words.speakerConfidence", "speakers.confidence", "transcriptAlignment"]
+            unsupportedFields: eleven ? ["words.language", "words.confidence", "words.speakerConfidence", "speakers.confidence", "transcriptAlignment"]
                 : ["audioEvents", "words.logProbability", "languageConfidence", "transcriptAlignment"],
             maxInputBytes: AnnotationUploadFile.maxInputBytes)
     }
@@ -77,7 +77,10 @@ public actor RemoteAnnotationProvider: AnnotationProvider {
             let parts = language.split(separator: "-", omittingEmptySubsequences: false)
             let letters = language.utf8.allSatisfy { (65...90).contains($0) || (97...122).contains($0) }
             let valid = eleven ? (letters && (2...3).contains(language.count))
-                : ((language == "multi") || (parts.count <= 2 && (2...3).contains(parts[0].count) && (parts.count == 1 || (2...4).contains(parts[1].count)) && parts.allSatisfy { !$0.isEmpty && $0.utf8.allSatisfy { (65...90).contains($0) || (97...122).contains($0) } }))
+                : ((language == "multi") || ((1...3).contains(parts.count) && (2...3).contains(parts[0].count)
+                    && parts[0].utf8.allSatisfy { (65...90).contains($0) || (97...122).contains($0) }
+                    && parts.dropFirst().allSatisfy { !$0.isEmpty && $0.count <= 8 && $0.utf8.allSatisfy {
+                        (65...90).contains($0) || (97...122).contains($0) || (48...57).contains($0) } }))
             guard valid else { throw RemoteAnnotationError.unsupportedOptions }
         }
         let keyName = eleven ? "ELEVENLABS_API_KEY" : "DEEPGRAM_API_KEY"
@@ -123,7 +126,7 @@ public actor RemoteAnnotationProvider: AnnotationProvider {
         let remoteMs = Int(Date().timeIntervalSince(remoteStart) * 1000)
         let parsed = try AnnotationResponseParser.parse(data, eleven: eleven, diarize: request.diarize)
         guard let duration = parsed.duration ?? prepared.duration, duration.isFinite, duration >= 0,
-              duration * 1000 <= Double(Int.max) else { throw RemoteAnnotationError.durationUnavailable }
+              duration * 1000 < Double(Int.max) else { throw RemoteAnnotationError.durationUnavailable }
         let metrics = AnnotationMetrics(traceId: UUID().uuidString, audioDurationMs: Int(duration * 1000),
             inputBytes: prepared.inputBytes, wasPreloaded: false, fileCheckMs: prepared.fileCheckMs,
             modelCheckMs: modelCheckMs, modelLoadMs: 0, audioLoadMs: prepared.audioLoadMs,

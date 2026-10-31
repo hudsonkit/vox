@@ -35,6 +35,13 @@ struct AnnotationProviderTests {
         #expect(parsed.requestId == nil && parsed.modelIds.isEmpty && parsed.languages.isEmpty)
         #expect(parsed.unavailable.contains("language") && parsed.unavailable.contains("languageConfidence"))
     }
+    @Test func multilingualLanguagesComeFromTheAlternativeAndEachWord() throws {
+        let body = Data(#"{"results":{"channels":[{"alternatives":[{"transcript":"Hello después","languages":["en","es"],"words":[{"word":"Hello","start":0,"end":0.3,"language":"en"},{"word":"después","start":0.4,"end":0.8,"language":"es"}]}]}]}}"#.utf8)
+        let result = try AnnotationResponseParser.parse(body, eleven: false, diarize: false)
+        #expect(result.languages == ["en", "es"] && result.language == nil)
+        #expect(result.words.map(\.language) == ["en", "es"])
+        #expect(!result.unavailable.contains("words.language"))
+    }
     @Test func malformedResponsesNeverBecomeZeroTimings() throws {
         for body in [#"{"text":"bad","words":[{"text":"bad","type":"word"}]}"#,
                      #"{"text":"bad","words":[{"text":"bad","type":"word","start":2,"end":1}]}"#,
@@ -102,9 +109,13 @@ struct AnnotationProviderTests {
         try PCMWAV.wrap(pcm: Data(repeating: 0, count: 32000), sampleRate: 16000).write(to: file)
         defer { try? FileManager.default.removeItem(at: file) }
         let key = "never-echo-this-fixture-key"
+        var impossibleDuration = try #require(JSONSerialization.jsonObject(with: Self.scribe) as? [String: Any])
+        impossibleDuration["audio_duration_secs"] = Double(Int.max) / 1000
+        let overflowDuration = try JSONSerialization.data(withJSONObject: impossibleDuration)
         for (status, body, expected) in [(401, Data(key.utf8), "HTTP 401"),
             (200, Data(repeating: 65, count: AnnotationHTTPUpload.maxResponseBytes + 1), "response_too_large"),
-            (200, Data("invalid JSON".utf8), "invalid_response")] {
+            (200, Data("invalid JSON".utf8), "invalid_response"),
+            (200, overflowDuration, "duration_unavailable")] {
             let configuration = AnnotationMockHTTPURLProtocol.session(body: body, statusCode: status).configuration
             let provider = RemoteAnnotationProvider(configuration: configuration)
             do {

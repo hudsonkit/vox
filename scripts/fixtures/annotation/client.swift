@@ -23,6 +23,7 @@ precondition(d.words.map(\.speakerId) == ["0", "1"] && d.words[0].confidence == 
 precondition(d.words[1].confidence == nil && d.speakers[0].confidence == nil)
 precondition(d.durationSource == "vendor" && d.providerModelIds == ["actual-model-revision"])
 precondition(d.unsupportedFields.contains("audioEvents"))
+precondition(d.languages == ["en"] && d.words[0].language == "en")
 for key in ["fixture-eleven-c", "fixture-eleven-d"] {
     _ = try await a.annotateFile(path: path, modelId: "elevenlabs:scribe_v2", credentials: ["ELEVENLABS_API_KEY": key])
 }
