@@ -18,8 +18,9 @@ class DevHostTests(unittest.TestCase):
         fixture='#!'+sys.executable+'\n'+'''import os,json,signal,time
 from pathlib import Path
 p=Path(os.environ['VOX_RUNTIME_PATH']);s=Path(os.environ['VOX_SOCKET_PATH'])
-p.write_text(json.dumps({'pid':os.getpid(),'authToken':'fixture-only'}));p.chmod(0o600);s.touch()
+s.touch()
 Path(os.environ['VOX_HOME'],'env.json').write_text(json.dumps({k:v for k,v in os.environ.items() if k.startswith('VOX_')}))
+t=p.with_suffix('.new');t.write_text(json.dumps({'pid':os.getpid(),'authToken':'fixture-only'}));t.chmod(0o600);t.replace(p)
 stop=False
 def end(*_):
  global stop
