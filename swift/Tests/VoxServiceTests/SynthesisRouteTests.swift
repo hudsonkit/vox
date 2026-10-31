@@ -37,6 +37,7 @@ private actor MockTTSProvider: TTSProvider {
     private let modelId: String
     private let voiceId: String
     private var capturedRequest: SynthesisRequest?
+    private var voiceCredentials: [String: String] = [:]
 
     init(modelId: String = "mock-tts:v1", voiceId: String = "voice-mock") {
         self.modelId = modelId
@@ -55,6 +56,12 @@ private actor MockTTSProvider: TTSProvider {
             )
         ]
     }
+
+    func voices(modelId: String?, providerCredentials: [String: String]) async throws -> [TTSVoiceInfo] {
+        voiceCredentials = providerCredentials
+        return try await voices(modelId: modelId)
+    }
+    func lastVoiceCredentials() -> [String: String] { voiceCredentials }
 
     func voices(modelId: String?) async throws -> [TTSVoiceInfo] {
         [
@@ -297,7 +304,7 @@ struct SynthesisRouteTests {
         #expect(request?.providerCredentials == ["OPENAI_API_KEY": "sk-test-lent"])
     }
 
-    @Test("synthesize.generate forwards NVIDIA, Groq, and Gemini credentials and drops unsupported keys")
+    @Test("synthesize.generate forwards ElevenLabs, NVIDIA, Groq, and Gemini credentials and drops unsupported keys")
     func synthesizeGenerateForwardsRemoteProviderCredentials() async throws {
         let provider = MockTTSProvider()
         let service = VoxRuntimeService(ttsEngine: TTSEngineManager(provider: provider))
@@ -311,7 +318,7 @@ struct SynthesisRouteTests {
                 "GROQ_API_KEY": "groq-lent",
                 "GEMINI_API_KEY": "gemini-lent",
                 "GOOGLE_API_KEY": "google-lent",
-                "ELEVENLABS_API_KEY": "unsupported",
+                "ELEVENLABS_API_KEY": " eleven-lent ",
                 "ignored": "not-forwarded"
             ]
         ])
@@ -322,8 +329,22 @@ struct SynthesisRouteTests {
         #expect(request?.providerCredentials["GROQ_API_KEY"] == "groq-lent")
         #expect(request?.providerCredentials["GEMINI_API_KEY"] == "gemini-lent")
         #expect(request?.providerCredentials["GOOGLE_API_KEY"] == "google-lent")
-        #expect(request?.providerCredentials["ELEVENLABS_API_KEY"] == nil)
+        #expect(request?.providerCredentials["ELEVENLABS_API_KEY"] == "eleven-lent")
         #expect(request?.providerCredentials["ignored"] == nil)
+    }
+
+    @Test("synthesize.voices forwards scoped ElevenLabs keys without changing the next request")
+    func synthesizeVoicesForwardsScopedCredentials() async throws {
+        let provider = MockTTSProvider()
+        let service = VoxRuntimeService(ttsEngine: TTSEngineManager(provider: provider))
+        _ = try await service.performSynthesizeVoices(params: ["modelId": "mock-tts:v1",
+            "credentials": ["ELEVENLABS_API_KEY": " selected-account ", "ignored": "drop"]])
+        #expect(await provider.lastVoiceCredentials() == ["ELEVENLABS_API_KEY": "selected-account"])
+        _ = try await service.performSynthesizeVoices(params: ["modelId": "mock-tts:v1"])
+        #expect(await provider.lastVoiceCredentials().isEmpty)
+        await #expect(throws: TTSVoiceCredentialsError.self) {
+            try await service.performSynthesizeVoices(params: ["credentials": ["ELEVENLABS_API_KEY": "selected-account"]])
+        }
     }
 
     @Test("synthesize.generate preserves CancellationError instead of mapping it to failure")

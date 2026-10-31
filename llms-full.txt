@@ -552,6 +552,8 @@ vox perf dashboard --client vox-cli
 
 Continue with the [Quickstart](./quickstart.md), [Models and plugins](./models.md), [Swift Embed Guide](./apple-embed.md), or [Web Integration Guide](./web-integration.md) for the surface you chose.
 
+Native app-captured streaming uses `NativeStreamingASR.shared` in process or `transcribe.stream.*` through a shared authenticated host. Batch file transcription remains on Parakeet v3. See [Runtime](./runtime.md#native-pcm-streaming).
+
 # Command line
 
 Source: /docs/quickstart
@@ -690,6 +692,88 @@ Add these product dependencies to the app target:
 
 Only add `VoxService` or `VoxBridge` if the app intentionally embeds companion/runtime behavior. That is not the default Apple app path.
 
+## Embedded Parakeet lifecycle
+
+For an iOS app that owns native batch ASR, keep a concrete `ParakeetProvider`.
+It implements `ASRProvider` and can also be injected into `EngineManager`.
+No daemon, private socket, Python/MLX runtime or FluidAudio loader is required.
+Batch policy remains explicitly `parakeet:v3`. These APIs require a source revision
+containing the lifecycle change; older published package ranges do not provide
+the new unload/delete methods. Pin the integration revision until released.
+
+```swift
+import Foundation
+import VoxCore
+import VoxEngine
+
+let batch = ParakeetProvider()
+let inventory = await batch.models()           // no download, Core ML load or compilation
+let directory = try batch.modelDirectory(modelId: "parakeet:v3") // read-only location
+let installed = try await batch.install(modelId: "parakeet:v3") { event in
+    print(event.status, event.progress)         // download/structural validation only
+}
+let ready = try await batch.preload(modelId: "parakeet:v3") { event in
+    print(event.status, event.progress)         // load, ANE placement check, priming
+}
+try await batch.setIdleUnload(modelId: "parakeet:v3", seconds: StreamingASRDefaults.idleUnloadSeconds)
+// The app owns capture and provides a finalized audio file to batch.transcribe.
+let unloaded = try await batch.unload(modelId: "parakeet:v3")
+let deleted = try await batch.deleteModel(modelId: "parakeet:v3")
+```
+
+**Install is now download-only for Parakeet.** Earlier revisions also loaded and
+primed during `install`. Call `preload` explicitly when ready to pay the cold-load
+cost. `installed` means the required bundle files exist, not that their Core ML
+contents have been loaded, compiled or verified for ANE execution. Inventory and
+location lookup never create a model or compile on CPU to validate files.
+
+- `unload(modelId:)` clears the actual shared runtime Session and its model-bearing
+  closures. It returns an `ASRModelInfo` snapshot with `preloaded: false` and no
+  placement. Other provider instances see that same released Session. Cache actors
+  and manifest metadata stay shared; this is not just clearing one app reference.
+- `deleteModel(modelId:)` unloads first, then removes only that Vox-owned revision.
+  It returns the actual installation/runtime snapshot. Missing storage is
+  idempotent. It never deletes siblings, FluidAudio stores, the model-store root,
+  older revision directories or Core ML's system/compiler caches. On a filesystem
+  error deletion may be partial and the runtime can already be unloaded; refresh
+  inventory rather than presenting a cached success state.
+- Both methods throw `ParakeetLifecycleError.busy` while any provider owner has
+  admitted installation, warmup, file preparation or inference for that model.
+  They do not steal active inference. Stop requesting work, wait for admitted work
+  to settle, then retry. Same-model installation and warmup are single-flight;
+  cancelling a waiter does not stop another owner's shared download/load.
+- `setIdleUnload(modelId:seconds:)` is process/model-scoped, including other owners
+  of the shared runtime. Default is 900 s on macOS and 60 s on iOS, optionally
+  configured by `VOX_ASR_IDLE_SECONDS`; zero explicitly disables idle eviction.
+  The setter rejects invalid values. Native inventory includes the actual
+  `ASRModelInfo.idleUnloadSeconds`; this is not a promise of fast reload.
+  Idle eviction never interrupts active operations. Cold preparation must remain
+  visible in app UI; do not silently pin models to hide startup cost.
+- Use `modelDirectory(modelId:)` for display or inspection, not caller-owned
+  recursive deletion. Talkie does not need manifest/cache path knowledge.
+  Owned-store deletion uses descriptor-relative traversal without following
+  symlinks below the trusted Vox home. Receipts bind new storage to model ID,
+  repository and revision. Known built-in legacy layouts remain manageable;
+  unreceipted custom nonempty directories and mismatched receipts are refused.
+- The reservation is process-local. Do not share one embedded store across app
+  processes without higher-level ownership coordination. On macOS, intentionally
+  shared clients should continue using `voxd`, not embed a second engine.
+- Unloaded means Vox released its Session references, not a guarantee of immediate
+  RSS reduction or an OS-wide cache purge. Readiness/placement comes from the
+  runtime snapshot, never an app-maintained boolean inferred from a wrapper release.
+
+The shared engine uses its process-selected conversion/store revision. Catalog
+refresh does not hot-swap a cached Parakeet engine; restart the process for a
+conversion revision change. Defaults remain pinned to the current shipped v3
+conversion. No lifecycle method imports a foreign FluidAudio installation.
+
+The complete [`examples/parakeet-lifecycle`](https://github.com/hudsonkit/vox/tree/main/examples/parakeet-lifecycle)
+consumer imports only public `VoxCore`/`VoxEngine` and is compiled for ARM64 iOS
+Simulator in CI. Simulator supports integration compilation, not ANE inference:
+production Parakeet advertises `available: false` there. Native inference requires
+supported Apple Silicon hardware and macOS 14.4 / iOS 17.4 or newer. No physical
+iOS placement, memory or accuracy result is implied by a Simulator build.
+
 ## Minimal local-first service
 
 ```swift
@@ -803,7 +887,7 @@ Do not hide warm-up behind app launch side effects. Warm on intent at a predicta
 
 ## Telemetry
 
-Companion mode records telemetry automatically. In embed mode, `VoxDictation` records a sample for every transcription (pass `recordsPerformance: false` to opt out). The lower-level types do not.
+Companion mode records telemetry automatically. In embed mode, `VoxDictation` records a sample for every transcription (pass `recordsPerformance: false` to opt out). `NativeStreamingASR.finish` also records its session, preserving clientId, route, and modelId; pass `recordPerformance: false` when the caller records it. The lower-level file engines do not.
 
 When you call `EngineManager` or `TTSEngineManager` directly, record samples yourself with `PerformanceRecorder` and preserve these dimensions:
 
@@ -825,7 +909,7 @@ Use the same route names Vox Companion uses:
 
 ## OpenAI TTS in embed mode
 
-- ASR: `EngineManager()` -> `ParakeetProvider()`
+- ASR: `EngineManager()` -> `NativeASRProvider()` (batch Parakeet plus explicit streaming models)
 - TTS: `TTSEngineManager()` registers every built-in provider: OpenAI, ElevenLabs, MiniMax, NVIDIA, Groq, Gemini and AVSpeech. It routes by model id and never falls back from one provider to another.
 - default TTS model: `TTSDefaults.modelId` = `gpt-4o-mini-tts`, which needs an OpenAI key
 - local TTS model: `TTSDefaults.localModelId` = `avspeech:system`, on device, no key
@@ -871,7 +955,7 @@ For a new Apple app integration, the default plan is:
 
 - `VoxDictation` covers dictation only. `VoxAppleSpeech` is optional playback, separate from it.
 - `VoxDictation.start()` is macOS only; on iOS it throws.
-- There is no public embed live-session coordinator yet: no partial text while recording.
+- `VoxDictation` still records then transcribes. Use `NativeStreamingASR.shared` with app-captured PCM for model-backed partials.
 - There is no public embed warm-up coordinator helper.
 - `EngineManager` and `TTSEngineManager` do not write performance samples; only `VoxDictation` does.
 - Apple apps do not need `@voxd/sdk` or `@voxd/client`.
@@ -896,6 +980,37 @@ Xcode copies SwiftPM resource bundles into the app for you. If you package the a
 `SpeechEngineResources` resolves the model catalog and mlx-audio provider script
 from that location in apps, and from SwiftPM resources in command-line builds.
 A packaged app does not fall back to a developer build directory.
+
+## App-captured streaming ASR
+
+Use `NativeStreamingASR.shared` when the app needs partial transcripts before capture stops. This API requires Apple Silicon and macOS 14.4 or iOS 17.4, so Core ML placement can be verified. The app supplies finite mono 16 kHz float32 PCM; use platform audio conversion, not a custom resampler.
+
+```swift
+import VoxCore
+import VoxEngine
+
+let asr = NativeStreamingASR.shared
+let modelId = StreamingASRDefaults.modelId
+// Explicit user-initiated warmup, not an app-launch side effect.
+_ = try await asr.preload(modelId: modelId, progress: { progress in
+    print(progress.status)
+})
+let sessionId = try await asr.begin(clientId: "my-app", modelId: modelId)
+// Feed 1–16000 samples per call; await each call before sending the next packet.
+let updates = try await asr.append(
+    sessionId: sessionId, clientId: "my-app", samples: capturedSamples
+)
+for update in updates { print(update.text, update.endOfUtterance) }
+let final = try await asr.finish(sessionId: sessionId, clientId: "my-app")
+print(final.text, final.words)
+// On interruption/error, call cancel instead of finish. It discards pending audio and text.
+```
+
+`preload(modelId:directory:language:progress:)` can use an explicitly supplied offline model bundle. Without a directory, preload installs missing assets. Installation alone is available through `install(modelId:progress:)` and does not instantiate models. Warmups for the same model join one flight. Start requires a ready model and never performs warmup.
+
+The runtime has one active owner and one loaded native ASR model per process. Batch Parakeet and streaming share that residency slot. Idle unload defaults to 900 seconds on macOS and 60 seconds on iOS; call `setIdleUnload(seconds:)` to configure it. A model switch still replaces the one resident model. The desktop window reduces eviction churn, not Core ML compiler latency; see the [idle/reload investigation](./reports/idle-reload-2026-10-30.md). Call `status()` to inspect the loaded model, planned encoder device assignment, and owner. Word timings are approximate RNNT emission frames. See [Native PCM streaming](./runtime.md#native-pcm-streaming) for endpoint semantics and lifecycle limits.
+
+For several app processes, deliberately use one `VoxRuntimeService` host or `voxd` over the authenticated private Unix transport. Each app sends PCM using the `transcribe.stream.*` routes. Do not embed a separate model in every app when the product intends shared residency.
 
 # Runtime
 
@@ -938,11 +1053,123 @@ operator/user request to acquire the model.
 
 `transcribe.file` is best for benchmarks because it takes mic capture out of the measurement. Returns transcript text, word-level timestamps, `modelId`, elapsed time, and stage metrics.
 
+Native Parakeet batch `words` are SentencePiece/whitespace-delimited word groups,
+with punctuation attached as it appears in the decoded text. Older revisions
+incorrectly returned individual BPE pieces in this array. A group's start/end
+cover the minimum start and maximum end of its contributing model-token
+intervals; `confidence` is the minimum piece confidence, not a calibrated word
+posterior. Timings remain TDT decoder-frame estimates (80 ms frames), not forced
+alignment or exact acoustic boundaries. Multiword pieces share their source
+interval rather than receiving invented subdivisions. Language-specific
+linguistic segmentation is not inferred beyond the model's whitespace markers.
+Missing vocabulary entries do not invent labels; incomplete alignment arrays
+return no timings rather than silently losing the tail or fabricating data.
+The same grouping runs after long-file chunk merging.
+
+
 ## File Annotation
 
-`annotate.file` is the file-first speaker annotation route. It accepts an audio path plus optional transcript text and word timings, and returns speaker segments, speaker-attributed words, and annotation metrics.
+`annotate.file` uploads a finalized media file to an explicitly selected cloud
+annotation model. The default `AnnotationManager` now routes these IDs:
 
-The route is scaffolded now so evaluation harnesses and future diarization backends can share one contract even before the default annotation backend lands.
+| Vox model ID | Vendor model | Request credential | Audio events |
+|---|---|---|---|
+| `elevenlabs:scribe_v2` | `scribe_v2` | `ELEVENLABS_API_KEY` | Supported |
+| `deepgram:nova-3` | `nova-3`, diarization `v2` | `DEEPGRAM_API_KEY` | Unsupported |
+
+Call `annotation.models` for capability metadata. Inventory does not authenticate
+an account. There is no implicit cloud default, ambient credential lookup, native
+ASR fallback, or cross-request account cache. The old `speaker-diarization:v1`
+placeholder errors with `annotation_model_required`. Native dictation and batch
+ASR remain separate from these cloud file providers.
+
+The authenticated private JSON-RPC request is:
+
+```json
+{
+  "method": "annotate.file",
+  "params": {
+    "clientId": "meeting-app",
+    "path": "/path/to/finalized-meeting.wav",
+    "modelId": "elevenlabs:scribe_v2",
+    "credentials": {"ELEVENLABS_API_KEY": "<request-scoped-key>"},
+    "diarize": true,
+    "tagAudioEvents": true,
+    "languageCode": "eng",
+    "numSpeakers": 2
+  }
+}
+```
+
+`diarize` defaults to true. `tagAudioEvents` defaults to true for Scribe and false
+for Deepgram; explicitly requesting Deepgram events errors before upload.
+`languageCode` is optional: Scribe accepts ISO 639-1/639-3 codes; Deepgram accepts
+language/region codes or `multi`. It is a hint, never reported as detected language
+unless the vendor actually returns it. `numSpeakers` is a Scribe-only 1–32 hint
+and requires diarization. Cloud providers reject supplied `text`/`words` alignment
+hints. Custom injected providers can still implement that legacy contract.
+
+`VoxDaemonClient.listAnnotationModels()` returns `[AnnotationModelInfo]`.
+`annotateFile(path:modelId:credentials:diarize:tagAudioEvents:languageCode:numSpeakers:timeout:)`
+returns `AnnotationOutput`; its timeout defaults to 3600 seconds. Both methods
+remain in the model-free `VoxClient` product. The TypeScript companion client
+exposes `listAnnotationModels()` and `annotateFile(path, options)` with an explicit
+`modelId`, optional `credentials`, these same options and `timeoutMs`.
+
+### Annotation evidence and limits
+
+- Word and event times are seconds from the file start. Missing or invalid word
+  times fail, rather than becoming zero. Speaker IDs remain vendor IDs: Scribe
+  strings are unchanged; Deepgram integers become decimal strings such as `"0"`.
+- `words.confidence` and `words.speakerConfidence` are nullable. Scribe supplies
+  raw `logProbability`, not a calibrated confidence; Vox does not exponentiate it.
+  Deepgram preserves returned word and speaker confidence. Missing scores stay null.
+- `audioEvents` contains Scribe's timed `audio_event` labels, separate from speech
+  words. Vox ignores spacing tokens. Deepgram has no supported audio-event output.
+- Scribe speaker spans derive from contiguous attributed words. Deepgram uses
+  returned utterance spans, or derives spans from words when absent.
+  `speakerSegmentsSource` distinguishes `vendor-utterances` and `word-span-derived`.
+  Derived spans have no invented confidence; utterance transcription confidence
+  is not speaker confidence. These spans are not acoustic VAD or speaker identity.
+- Deepgram multilingual `languages` come from the selected alternative; per-word
+  `words.language` is preserved when supplied. Vox never substitutes the first
+  language for an absent detected-language field.
+- `language`, `languageConfidence`, `languages`, `providerRequestId` and
+  `providerModelIds` preserve vendor evidence. Missing IDs stay null/empty, not
+  locally generated vendor identifiers. `unsupportedFields` names provider limits;
+  `unavailableFields` names supported fields absent from this response.
+- `duration` uses vendor duration, else readable local media metadata;
+  `durationSource` is `vendor` or `media-file`. Neither is asserted to be billed
+  duration. Unknown duration errors with `annotation_duration_unavailable` rather
+  than inventing zero or using the last word's end.
+- Vox limits input to 2,000,000,000 bytes and two active annotation requests. An
+  additional request errors busy. Upload preparation copies in 64 KiB chunks to an
+  owner-only temporary file, removed on completion/error/cancellation. No upload
+  or response cache is kept. Successful performance samples contain routing and
+  stage metrics, not keys, media, transcript text or vendor responses.
+- HTTP responses are bounded to 4 MiB and encoded results to 8 MiB. Excess fails
+  explicitly. Redirects are refused; Vox does not implement retries. HTTP errors
+  expose status only, never vendor error bodies that could echo credentials.
+- Cancel a Swift client task or disconnect its client to cancel that connection's
+  in-flight uploads and response waits. Other clients are unaffected. No per-file
+  cancel RPC or vendor cancellation guarantee exists. Already accepted vendor work
+  can continue or incur charges. Upload and vendor retention require user consent;
+  Vox does not promise the vendor's zero-retention mode or modify account settings.
+
+The provider runs in Swift inside `voxd`, not a new external ASR process provider.
+It implements the existing native annotation contract and does not introduce a
+Python, MLX, FluidAudio, or Rust process in the native dictation path.
+Host-only `VOX_ANNOTATION_ELEVENLABS_URL` and `VOX_ANNOTATION_DEEPGRAM_URL` can
+override complete endpoints for testing/deployment. They accept HTTPS, or HTTP
+loopback only, without URL credentials, queries or fragments. Invalid explicit
+overrides fail closed. Clients cannot set these endpoints over RPC. A host owner
+who overrides an endpoint controls where that provider's request key is sent.
+
+Contract sources: [Scribe conversion API](https://elevenlabs.io/docs/api-reference/speech-to-text/convert)
+and [Deepgram prerecorded API](https://developers.deepgram.com/reference/speech-to-text/listen-pre-recorded),
+including [Nova-3 multilingual response fields](https://developers.deepgram.com/docs/nova-3-language-prompting).
+Fixture tests validate routing and schema preservation, not paid-account access,
+real audio accuracy, vendor retention or production vendor availability.
 
 ## Synthesis
 
@@ -963,6 +1190,50 @@ Longer-running output flows use:
 - `synthesize.startSession`
 - `synthesize.sessionStatus`
 - `synthesize.cancel`
+
+### Scoped ElevenLabs generation and voices
+
+Send an explicit `modelId`, `voiceId` and `credentials: { "ELEVENLABS_API_KEY": key }`
+to `synthesize.generate` or `synthesize.startSession`. The key belongs to that
+request. It is not stored in provider configuration, the process environment,
+history or credential files. Request keys override configured keys; an invalid
+selected key fails instead of retrying another account.
+
+`synthesize.voices` accepts the same credentials with an explicit ElevenLabs
+`modelId`, so account-specific voices use the selected account. OpenAI's static
+voice list also accepts scoped credentials. Unsupported built-in scoped voice discovery
+returns an error instead of silently using daemon credentials. Do not place keys
+in voice-list HTTP query strings; this is a companion RPC capability.
+
+Swift `VoxClient` callers use `call(_:params:timeout:onProgress:)` with these JSON
+parameters. No inference-engine linkage is required. TTS inventories describe
+daemon-configured availability; supplying a key does not change global defaults
+or inventory. See [provider rules and output-format requirements](./providers.md).
+
+### TTS diagnostic privacy and cancellation
+
+OpenAI and ElevenLabs HTTP failures expose status only. Untrusted vendor error
+bodies are not included in service telemetry, provider errors or daemon logs.
+OpenAI's default session is ephemeral without cache, cookies or credential
+storage; synthesis requests use no-store. Previously persisted diagnostics are
+not rewritten by this change.
+
+Cancelling a `VoxDaemonClient.call` task closes that client connection and cancels
+its owned generation and authenticated voice-lookup tasks. Use a dedicated client
+connection for an independently cancellable operation. Other connections continue
+using the same helper. There is no public per-request `synthesize.generate`
+cancel RPC; `synthesize.cancel` still targets synthesis sessions.
+
+For the stock bundled `voxttsd`, cancellation propagates through the external
+provider to its matching helper task and HTTP request. The helper remains alive;
+unrelated requests are not cancelled. A transport timeout uses the same scoped
+cancellation. Closing HTTP does not guarantee vendor-side cancellation, retention
+or refund. Custom external TTS providers need explicit protocol support; see
+[provider cancellation](./providers.md#request-scoped-tts-cancellation).
+
+Build and deploy matching daemon/helper revisions together. The local fixture
+`python3 scripts/test-private-tts.py` exercises both vendors and simultaneous
+clients without paid calls. See the [verification report](./reports/tts-privacy-cancellation-2026-10-30.md).
 
 ## RPC Routes
 
@@ -1012,7 +1283,7 @@ A host app can construct `VoxRuntimeService` or `ServiceBridge` with `socketPath
 
 The socket directory must be owned by the current user. The runtime creates it with mode `0700`, creates the socket with mode `0600`, rejects symlink paths, and checks the connected peer UID. Clients must send `x-lattices-token` during WebSocket upgrade. The server rejects browser `Origin` headers, invalid `Host` headers, duplicate headers, and unauthorized upgrades before RPC dispatch. Use `Host: localhost` and request path `/`.
 
-Private connections retain the same JSON-RPC methods, events, and connection ownership. The transport limits incoming frames to 16 MiB and queued output to 32 MiB. The runtime registry reports `port: 0` and `socketPath` for a private endpoint. The host owns capability publication and client discovery; the standalone CLI and browser bridge continue to use their existing TCP configuration.
+Private connections retain the same JSON-RPC methods, events, and connection ownership. The transport limits incoming frames to 16 MiB and queued output to 32 MiB. The runtime registry reports `port: 0` and `socketPath` for a private endpoint. `VoxRuntimeService` publishes the owner-only capability described below. A raw `ServiceBridge` host can publish it with `PrivateRuntimeRegistration`. The TypeScript TCP client/CLI refuse private capabilities; TCP and browser deployments retain their explicit TCP configuration.
 
 ## Configuration
 
@@ -1061,6 +1332,212 @@ vox logs daemon --tail 80
 
 See [Architecture](./architecture.md) for layer ownership and [Observability](./observability.md) for performance sample interpretation.
 
+## Native PCM streaming
+
+Use the app-captured PCM routes for model-backed partial text. The live default is `nemotron:unified-560ms` (Nemotron Labs Unified); file transcription remains `parakeet:v3`. These routes are separate from the existing daemon-microphone `transcribe.startSession` routes. The app owns microphone permission, capture, and conversion to mono 16 kHz float32 PCM. Vox owns inference, decoder state, word timings, and endpoint detection.
+
+For several apps, run one `voxd` and connect through its authenticated private Unix transport. Set `VOX_SOCKET_PATH` and `VOX_AUTH_TOKEN` in the host environment; private mode requires both and opens no TCP listener. Do not launch one daemon per app. For a single-process app, use `NativeStreamingASR.shared` from `VoxEngine` instead. Both surfaces use the same Swift/Core ML implementation. Neither uses Python, MLX, or the FluidAudio package.
+
+1. Call `models.install` with the live `modelId`. Installation does not load the streaming model.
+2. Call `models.preload` explicitly. Preload loads the encoder, verifies its compute plan, and primes prediction. Allow for a cold ANE compile.
+3. Call `transcribe.stream.start` with `clientId` and `modelId`. Start requires a preloaded model and does not download or warm it.
+4. Send `transcribe.stream.append` packets. Await each acknowledgement before sending the next packet.
+5. Call `transcribe.stream.finish` to flush pending audio and obtain the final transcript. Call `transcribe.stream.cancel` to discard it instead.
+
+Every append, finish, and cancel request must include the returned `sessionId` and the same `clientId`, on the same connection. A disconnect cancels that connection's session. One session owns the native model slot; other callers receive a busy error. Sessions expire after 120 seconds. A client must start a new session after reconnecting.
+
+### Swift companion client
+
+For intentional cross-process Apple integrations, select the `VoxClient` Swift
+package product. Its only target dependency is `VoxCore`. It does not link
+`VoxEngine`, `HudsonSpeechEngine`, `VoxService`, or model resources. Both the root
+package and `swift/Package.swift` export this product. It is not present in older
+published versions; use a revision that contains the product.
+
+```swift
+import VoxClient
+
+let client = VoxDaemonClient(clientId: "talkie")
+try await client.connect(.unix(socketPath: socketPath, authToken: authToken))
+_ = try await client.installModel(StreamingASRDefaults.modelId) { progress in
+    // Update app UI from progress.event and progress.data. Return promptly.
+}
+_ = try await client.preloadModel(StreamingASRDefaults.modelId)
+let session = try await client.startPCMStream()
+let ack = try await client.appendPCMStream(
+    sessionId: session.sessionId, sequence: session.nextSequence, samples: samples)
+// Render ack.updates. Use ack.nextSequence for the next packet.
+let final = try await client.finishPCMStream(sessionId: session.sessionId)
+await client.disconnect()
+```
+
+The app supplies `socketPath`, `authToken`, and captured `samples`. Provision the
+credential through the host, not a URL or a log. The Unix client checks private
+filesystem ownership and permissions, rejects symlink paths, checks the server
+peer UID, and validates the WebSocket upgrade before RPC dispatch. It masks
+outgoing frames and bounds incoming messages to 16 MiB and queued output to 32 MiB.
+
+`VoxEndpoint.runtime(runtime, authToken:)` selects a private socket from
+`RuntimeInfo`. It refuses TCP metadata unless `allowTCP: true` is explicit.
+Direct `.tcp(host:port:authToken:)` selection is also an explicit opt-in. This is
+unencrypted WebSocket; use a trusted loopback host. The client never launches a daemon, reconnects, or falls back to another
+transport. Use `connectDiscovered()` for the owner-only host capability described
+below, or pass an explicit endpoint.
+
+`listModels()`, `listCatalog()`, `installModel(_:onProgress:)`,
+`preloadModel(_:timeout:onProgress:)`, and `transcribeFile(path:modelId:)` return
+`JSONValue`, a Sendable Codable value. This preserves provider metrics and
+catalog fields without a parallel schema. `nativeStreamingStatus()` returns
+`NativeStreamingStatus` from `VoxCore`. PCM methods return typed
+`PCMStreamingSession`, `PCMStreamingAcknowledgement`, and `StreamingASRUpdate`.
+`cancelPCMStream(sessionId:)` discards the session without a transcript.
+
+Use `call(_:params:timeout:onProgress:)` for other existing routes, including
+warmup and TTS. It always supplies the client's stable `clientId`.
+Progress callbacks receive `VoxRPCProgress` and run on the client actor; dispatch
+UI changes to the main actor. Install defaults to a 30-minute request budget;
+preload and file transcription default to 5 minutes, and other methods default
+to 30 seconds.
+Preload callers can select a different wait budget, for example
+`preloadModel("parakeet:v3", timeout: .seconds(600))`. This changes the caller's
+wait deadline, not residency or server compilation cancellation. Cold readiness
+must be visible in app UI; do not hide it by disabling idle unload or starting
+capture before readiness. At most 64 RPC requests can be pending. PCM append and finish reject overlapping
+operations for the same session; await each acknowledgement.
+
+A cancelled or timed-out request closes the connection and fails all pending
+requests. The daemon cancels connection-owned sessions on disconnect. Execution
+of an already received request is uncertain: cancellation of an install wait is
+not a server-side download-cancel capability. Never retry an uncertain append.
+Reconnect explicitly and start a new session. App error paths must disconnect or
+cancel their owned session; abandoning an awaiting task without cancelling it is
+not cancellation.
+
+This client does not add VAD events, confirmed-word boundaries, dictionary hints,
+download deletion/cancellation, or native ASR language result fields. It exposes
+the 120-second native stream limit. Annotation has its own explicit cloud model
+inventory, language evidence, credentials and limits described above. TTS cancellation uses synthesis sessions; raw
+`synthesize.generate` does not have a per-request cancel RPC.
+
+### Private runtime discovery
+
+Start the user-owned shared daemon with:
+
+```sh
+voxd --private
+```
+
+This selects `VOX_HOME/voxd.sock` (default `~/.vox/voxd.sock`) and generates a fresh
+256-bit credential with the system secure random source on each launch. It opens
+no TCP listener. The credential is published only in the owner-only capability;
+it is not put in process environment or command arguments. A user LaunchAgent
+needs the executable path and `--private` in its `ProgramArguments`, not a token
+in the plist. This change does not install or replace a launch service.
+
+`VOX_SOCKET_PATH` can select a different private socket, with or without
+`--private`. The daemon generates a credential when `VOX_AUTH_TOKEN` is absent;
+a nonempty valid explicit token remains available for deliberate host control.
+An explicitly empty/invalid token fails rather than being replaced. Do not
+combine private mode with `--port`. Independently launched GUI clients should
+use capability discovery, not inherit a socket-only environment override.
+No app should start a replacement daemon when discovery or authentication fails.
+
+In private mode, the daemon atomically publishes a credential-bearing capability
+at `VOX_RUNTIME_PATH`, or `VOX_HOME/runtime.json`, or `~/.vox/runtime.json`.
+The immediate directory is owner-only `0700`; the file is a same-user regular
+file with mode `0600`, one hard link, and a 64 KiB reader limit. Reads and writes
+reject symlink ancestors and leaves. Treat this file as a credential, not a
+status document. Do not print or copy its raw JSON into logs or diagnostics.
+
+All fields are at the top level:
+
+| Field | Contract |
+|---|---|
+| `schemaVersion` | `1` |
+| `transport` | `unix+ws+json-rpc` |
+| `instanceId` | UUID, changes on each publication |
+| `socketPath` | Absolute private Unix socket path |
+| `authToken` | Current server token (generated unless explicitly overridden); no `authTokenPath` indirection |
+| `port` | `0`; never interpret this as a request to use a default TCP port |
+| `version`, `serviceName`, `pid` | Existing Vox runtime metadata |
+| `startedAt` | Existing JSONEncoder Date representation: seconds since 2001-01-01 UTC |
+
+`VoxEndpoint.discovered()` and `VoxDaemonClient.connectDiscovered()` use this order:
+
+1. If either `VOX_SOCKET_PATH` or `VOX_AUTH_TOKEN` is present, require both to be
+   nonempty and use that explicit pair. An incomplete pair is an error.
+2. Otherwise read the capability file at the selected runtime path. Verify file
+   safety, schema and private transport. Missing, malformed, unsafe and legacy
+   TCP metadata do not trigger TCP fallback or daemon launch.
+3. On connect, verify socket safety and the same-user server peer before sending
+   the token. A reconnect must reread the capability and start a new session.
+
+Private startup refuses a runtime record whose PID is still live, including
+legacy TCP metadata without a token. Stop the existing host deliberately before
+switching the canonical runtime to private mode. Do not fix an old `0644` record
+by hand-writing a token or merely changing its permissions. Stale same-user
+legacy metadata can be atomically replaced with a new `0600` capability after
+the old PID is gone. Malformed or unsafe records fail closed; verify ownership
+before manual cleanup. Use an isolated `VOX_HOME` and `VOX_RUNTIME_PATH` for tests.
+
+Only one private publisher can hold a runtime-file lease. Isolated test hosts
+must select their own `VOX_RUNTIME_PATH`. Publication failure closes the new
+listener instead of leaving an undiscoverable service. Normal shutdown removes
+only the capability whose `instanceId` belongs to that registration. After a
+crash, a new host can acquire the released lease and replace stale metadata.
+Swift `RuntimeRegistry.read()` still returns metadata only; health/status never
+include `authToken`. The current TypeScript TCP client/CLI reject a private
+capability explicitly rather than starting or connecting to a second TCP daemon.
+They do not yet implement private Unix transport.
+
+```swift
+import VoxClient
+
+let client = VoxDaemonClient(clientId: "talkie")
+try await client.connectDiscovered()
+let status = try await client.nativeStreamingStatus()
+await client.disconnect()
+```
+
+The host owns daemon launch; `voxd --private` owns secure token generation and
+publication unless an explicit credential override is supplied. Direct TCP mode remains available for deliberate
+legacy deployments; its registry is metadata, not a private capability.
+
+### PCM wire contract
+
+| Route | Parameters | Result |
+|---|---|---|
+| `transcribe.stream.start` | `clientId`, optional `modelId` | `sessionId`, `modelId`, `sampleRate: 16000`, `channels: 1`, `encoding: "float32le"`, `maxPacketSamples: 16000`, `nextSequence: 0` |
+| `transcribe.stream.append` | `clientId`, `sessionId`, `sequence`, `audioBase64` | `sessionId`, `nextSequence`, `updates[]` |
+| `transcribe.stream.finish` | `clientId`, `sessionId` | `sessionId`, `result` |
+| `transcribe.stream.cancel` | `clientId`, `sessionId` | `sessionId`, `cancelled: true`; no final transcript |
+| `transcribe.stream.status` | none | loaded/loading `modelId`, encoder `placement`, active session/client, `idleUnloadSeconds` |
+
+`audioBase64` encodes little-endian IEEE float32 samples. Each packet contains 1–16000 finite samples. Use 80 ms packets (1280 samples) for responsive feedback. Sequence numbers start at zero and increase once per acknowledged packet. Duplicate and out-of-order packets are rejected. Do not retry an append whose receipt is uncertain; cancel or reconnect and begin a new session. There is no unbounded server-side PCM queue.
+
+Each update and final result contains:
+
+- `text`: cumulative transcript, not a text delta;
+- `words`: `word`, `start`, `end` in seconds, and `confidence`;
+- `processedAudioMs`: the processed position on the input-audio timeline;
+- `chunkLatencyMs`: inference time for that chunk;
+- `endOfUtterance`: an endpoint notification, not an implicit stop;
+- optional `endpointSource`: `model` for the Parakeet EOU token, or `blank-duration` for Nemotron's 1120 ms RNNT blank-duration rule.
+
+Word timestamps are approximate greedy RNNT emission frames, not forced alignment. The caller decides whether an endpoint should finish the session. Finish is explicit, including when the last update signals an endpoint. Finish results do not synthesize a model endpoint.
+
+### Placement and residency
+
+After load, Vox reads `MLComputePlan` with `.cpuAndNeuralEngine`. Diagnostics expose preferred ANE, CPU, GPU, and unassigned operation counts, plus ANE/CPU counts for convolution, linear, and matrix-multiplication operations. A few CPU shape and integer operations are expected. The encoder must have compute operations on ANE. If any compute operations use CPU, at least 95% of the scheduled ANE/CPU estimated cost must be on ANE. This allows the two small CPU pre-encode convolutions in Nemotron on M1 without accepting a CPU encoder. A failed placement check releases the instance, retries once, then fails instead of accepting CPU fallback. This verifies the planned device assignment; it is not a hardware execution trace.
+
+The native ASR slot is process-wide and shared by batch Parakeet and streaming providers. Model switching unloads the previous model before loading another. An active session or batch inference holds an exclusive lease. Warmup is serialized; same-model streaming warmups join one flight. Installation validation checks files and byte counts without loading or compiling models.
+
+Native ASR idle unload defaults to **900 seconds on macOS** and **60 seconds on iOS**. Set `VOX_ASR_IDLE_SECONDS` before starting the host to override it; `0` explicitly disables eviction. Invalid or negative environment values use the platform default. Embedded streaming callers can also call `setIdleUnload(seconds:)`; Parakeet has a model-scoped setter. Active operations are not evicted. One native residency slot still spans batch and streaming; selecting a different model can require cold preparation even inside the idle window.
+
+The bounded desktop window avoids a 60-second eviction between nearby dictations. It does not fix Core ML compilation stalls or guarantee a fast reload. A normal-UI test observed a 106-second first preparation and a second, still-pending ANE load after more than 10 minutes. See the [idle/reload investigation](./reports/idle-reload-2026-10-30.md) before making startup or memory claims. Show explicit prepare progress and propagate the same cold-load deadline through each app/XPC/RPC layer. A client timeout is not proof that an OS compiler operation stopped.
+
+Preload again after eviction. `transcribe.stream.status` and native entries in `models.list` expose the actual configured `idleUnloadSeconds`, residency and planned placement. Core ML load logs separate component `model-load` from encoder `compute-plan`, with start/completion/failure, attempt and elapsed milliseconds. They do not log file paths, request content, credentials or underlying error bodies. Streaming telemetry preserves `clientId`, `route: "transcribe.streaming"`, and `modelId`.
+
 # Models and plugins
 
 Source: /docs/models
@@ -1082,6 +1559,7 @@ These families run without a plugin:
 
 | Family | Default or typical ids | How it runs |
 |---|---|---|
+| `coreml-streaming` | `nemotron:unified-560ms` (default live), `parakeet:eou-320ms` | Native Swift/Core ML streaming; verified ANE encoder |
 | `parakeet-tdt` | `parakeet:v3` (default), `parakeet:v2` (English) | On-device CoreML |
 | `apple-speech` | `apple:speech-transcriber` | On-device Speech framework; macOS 26+ |
 | `openai-transcribe` | `gpt-transcribe`, `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, `whisper-1` | OpenAI Audio API; needs `OPENAI_API_KEY` |
@@ -1093,13 +1571,17 @@ Apple SpeechTranscriber is registered by the default daemon, so selecting its mo
 
 ## Current local shortlist
 
-- `parakeet:v3`: default, mature CoreML path, 25 European languages.
+- `nemotron:unified-560ms`: default native live model, October 28 Core ML conversion, 25 European languages. Buffered streaming with a 160 ms stride and 400 ms right context.
+- `nemotron:streaming-560ms`: cache-aware Nemotron 3.5 Latin alternative when earlier first partials matter more than the measured quality/memory advantage of Unified.
+- `parakeet:v3`: default file model, mature CoreML path, 25 European languages.
 - `apple:speech-transcriber`: system-managed on-device parity option with word timings on macOS 26+.
 - `mlx-community/Qwen3-ASR-1.7B-8bit`: multilingual accuracy candidate on Apple Silicon.
 - `mlx-community/cohere-transcribe-03-2026-mlx-8bit`: strong offline multilingual candidate; not a realtime model.
 - `mlx-community/nemotron-3.5-asr-streaming-0.6b-8bit`: 0.6B cache-aware streaming RNNT candidate covering 35 languages.
 
-Catalog `capabilities.liveTranscription` describes what Vox exposes today, not what an upstream model architecture can theoretically do. It remains `false` for every current provider because Vox's public ASR contract still accepts a completed audio file and returns finalized text. Apple and Nemotron are streaming-capable foundations for the next runtime slice, but selecting them does not yet turn `session.partial` into model-backed partial transcription.
+Catalog `capabilities.liveTranscription` describes the Vox surface, not just the upstream model. Native `coreml-streaming` models expose model-backed partials through `NativeStreamingASR.shared` and the app-captured `transcribe.stream.*` routes. Other file-only providers retain `liveTranscription=false`. The older daemon-microphone `transcribe.startSession` flow still transcribes after recording stops.
+
+Native streaming requires Apple Silicon and macOS 14.4 / iOS 17.4, so Vox can verify encoder placement with `MLComputePlan`. Install and preload explicitly. One process-wide native ASR slot serves batch and streaming; idle models unload after a configurable timeout (macOS 900 s / iOS 60 s by default). Native inventory reports the actual `idleUnloadSeconds`. See [Native PCM streaming](./runtime.md#native-pcm-streaming) for ownership, backpressure, timestamps, and endpoint semantics. `parakeet:v3` remains the default file model on the pinned August 19 conversion.
 
 Vox does not ship Intel support. Local runtime entries are marked `architectures: ["arm64"]`. Audio conversion for native model inputs uses platform or provider libraries; do not add hand-written sample-rate conversion or denoising code to a model adapter.
 
@@ -1337,14 +1819,19 @@ Notes:
 - Vox supports Apple Silicon only. Do not treat successful remote-provider compilation on an Intel host as a supported configuration.
 - Register ASR and TTS as separate entries even when they share the same `id`.
 - `models` is optional for external providers now. Vox can call `models()` and route dynamically from the returned list.
-- OpenAI, NVIDIA Magpie, Groq, and Gemini/Google accept per-request `credentials` on `synthesize.generate` / companion synthesis. Those keys are allowlisted through `VoxRuntimeService` and `VoxBridge`; unknown keys, including ElevenLabs and MiniMax keys, are dropped. ElevenLabs and MiniMax currently read only provider `env` and the process environment.
+- OpenAI, ElevenLabs, NVIDIA Magpie, Groq, and Gemini/Google accept per-request `credentials` on `synthesize.generate` / companion synthesis. Those keys are allowlisted through `VoxRuntimeService` and `VoxBridge`; unknown keys, including MiniMax keys, are dropped. MiniMax currently reads only provider `env` and the process environment.
 - Credential order for the providers that accept lent keys is per-request `credentials`, then provider `env`, then the process environment. An explicit provider `env` key or alias, even empty or whitespace, fences process fallback for both configured credential resolution and default model selection so a host can lend keys per request without inheriting an ambient secret. Process env is consulted only when no relevant credential key is present in provider `env` (including when `env` is omitted). Values are never logged or stored by the allowlist parser.
-- NVIDIA Magpie, Groq, and Gemini synthesis HTTP errors redact the exact request text before a vendor body can be persisted or logged. JSON diagnostics keep useful vendor detail after secret and exact-prompt redaction. Plain-text non-JSON bodies fail closed whenever synthesis sensitive values (prompt or instructions) are supplied, including distinctive fragments such as `quota: ` plus a short prompt prefix. Voice discovery has no prompt and is not covered by that fail-closed path. This sanitization applies to these new remote providers; OpenAI, ElevenLabs, MiniMax, and AVSpeech keep their existing error surfaces.
+- NVIDIA Magpie, Groq, and Gemini synthesis HTTP errors redact the exact request text before a vendor body can be persisted or logged. JSON diagnostics keep useful vendor detail after secret and exact-prompt redaction. Plain-text non-JSON bodies fail closed whenever synthesis sensitive values (prompt or instructions) are supplied, including distinctive fragments such as `quota: ` plus a short prompt prefix. Voice discovery has no prompt and is not covered by that fail-closed path. This sanitization applies to these new remote providers; OpenAI, MiniMax, and AVSpeech keep their existing error surfaces. ElevenLabs HTTP failures expose only the status code, never a vendor body that could echo a credential or text.
+- ElevenLabs accepts `credentials.ELEVENLABS_API_KEY` (`elevenlabsApiKey` / `elevenlabs_api_key` aliases) for synthesis and RPC voice discovery. Voice discovery with credentials requires an explicit `modelId`; unsupported built-in providers return an error instead of ignoring the key. OpenAI's static voice catalog also accepts scoped credentials. The browser HTTP voice-list route does not accept keys in a URL.
+- External adapters receive scoped voice credentials through the provider protocol and must honor that contract. This change verifies the bundled `voxttsd` path, not arbitrary third-party adapter implementations. Lend only the selected provider's key, not an entire credential store.
+- A lent ElevenLabs key is a request-local value. It does not change provider configuration, process environment, credentials files, model availability, or another client's account. Defaults use an ephemeral URLSession without disk/cache/cookie/credential storage; requests carry `Cache-Control: no-store`. Custom injected sessions are owned by the embed caller. No global key is needed for an explicitly selected ElevenLabs model with a lent key. Availability inventories describe daemon-configured credentials, not a previously borrowed key.
+- ElevenLabs WAV output defaults to `wav_44100`, correcting the invalid legacy `wav_44100_128` value. The [official API format list](https://elevenlabs.io/docs/api-reference/text-to-speech/convert) supports `wav_44100`; 44.1 kHz WAV requires the applicable account tier. Set `ELEVENLABS_OUTPUT_FORMAT` explicitly for another supported WAV rate. There is no silent tier/model/provider fallback. Invalid non-WAV success bodies are rejected before becoming audio output.
 - `ELEVENLABS_BASE_URL`, `ELEVENLABS_OUTPUT_FORMAT`, `MINIMAX_BASE_URL`, `NVIDIA_TTS_URL`, `NVIDIA_VOICES_URL`, `GROQ_BASE_URL`, and `GEMINI_BASE_URL` can override vendor defaults.
 - NVIDIA Magpie accepts `NV_API_KEY` and the `NVIDIA_API_KEY` compatibility alias, plus camelCase / snake_case variants. Gemini accepts `GEMINI_API_KEY`, `GOOGLE_API_KEY`, and `GOOGLE_GENAI_API_KEY`.
 - Remote providers are considered for default model selection and in-process default registration only when they are configured in `providers.json` or the daemon environment. An API key in the process environment is not broader user consent than selecting or configuring that provider. Configured aliases such as `magpie`, `groq-tts`, and `google-tts` prevent the canonical default entries from being appended over that family's routing and key config.
 - If `providers.json` contains only ASR entries, Vox falls back to default TTS providers. The inverse is also true. The default TTS model remains `gpt-4o-mini-tts` when OpenAI is configured. App-registry and daemon/config default selection share one canonical ranking independent of `providers.json` order and independent of the alphabetically sorted `TTSProviderRegistry` model list: OpenAI `gpt-4o-mini-tts`, then ElevenLabs, MiniMax, NVIDIA Magpie, Groq, Gemini, then `avspeech:system`.
-- The public ASR provider method is currently file-based. Apple SpeechTranscriber and Nemotron have streaming-capable internals, but live partial events require a separate runtime/protocol integration.
+- `ASRProvider.transcribe` and the external provider protocol remain file-based. Native Core ML streaming has a separate PCM API, `NativeStreamingASR.shared`, and companion `transcribe.stream.*` routes. These emit model-backed cumulative partials; see [Runtime](./runtime.md#native-pcm-streaming).
+- Native Parakeet batch word timings group BPE/SentencePiece pieces at whitespace boundaries, including punctuation. Spans use min/max model-token intervals; confidence is the minimum piece score. These are 80 ms TDT frame estimates, not forced alignment or language-specific word segmentation. Long-file timing uses the merged token stream. Missing alignment is returned as no timings, never invented token labels or truncated tail timestamps.
 - Native audio adaptation uses `AVAudioConverter`, SpeechAnalyzer's file path, or provider-owned conversion. Provider adapters must not implement ad hoc resampling or denoising.
 
 ### OpenAI TTS timeout
@@ -1816,6 +2303,41 @@ Vox spawns the provider process on first use. It stays alive for the daemon's li
 
 Providers should be stateless between requests. The provider process can keep model weights in memory, but Vox assumes nothing about that state -- a crash and restart must not break anything.
 
+## Request-scoped TTS cancellation
+
+The stock daemon enables this extension for its matching bundled `voxttsd`.
+A compatible custom external TTS entry can opt in with
+`"supportsRequestCancellation": true`. Do not set it for an older helper or a
+provider that cannot cancel by transport ID. The field defaults to absent/false;
+legacy providers still support cancelling the local await, but remote work can
+continue. Cancellation never terminates the shared provider process.
+
+When an awaiting task cancels or its transport deadline expires, `StdioTransport`
+removes that pending call and optionally sends this JSON-RPC notification:
+
+```json
+{"jsonrpc":"2.0","method":"$/cancelRequest","params":{"id":17}}
+```
+
+`params.id` is the numeric JSON-RPC call ID, not the synthesis request UUID,
+client ID, model ID or voice ID. Notifications have no outer ID or acknowledgement.
+Unknown/completed IDs are ignored. The bundled helper cancels only that task and
+can return error code `-32800` / `request_cancelled`; the host ignores late replies
+for already-cancelled calls. Pending calls cannot resume twice.
+
+The helper admits at most 16 requests and rejects excess with a busy error. A
+bounded 1 MiB stdin frame reader runs on a dedicated thread, not MainActor or a
+cooperative executor. The reader continues servicing cancellation while synthesis
+awaits HTTP or AVFoundation. Parent EOF cancels and drains accepted tasks. Output
+lines and host request/cancel writes are serialized so simultaneous callers cannot
+interleave JSON frames. The host rejects oversized opted-in requests before sending;
+the helper drains an oversized frame without cancelling unrelated tasks. No request keys or prompt bodies are logged by this path.
+
+This extension is currently wired for external TTS, not the external ASR process
+protocol. Public daemon synthesis-session cancellation and native ASR residency
+are unchanged. HTTP cancellation cannot guarantee vendor-side cancellation or
+billing outcome.
+
 # SDK (Companion Client)
 
 Source: /docs/sdk
@@ -1867,14 +2389,15 @@ interface VoxClientSurface {
   listModels(): Promise<unknown>;
   listCatalog(): Promise<SpeechModelCatalog>;
   refreshCatalog(): Promise<SpeechModelCatalog>;
-  listVoices(modelId?: string): Promise<unknown>;
+  listVoices(modelId?: string, credentials?: SynthesisOptions["credentials"]): Promise<unknown>;
   installModel(modelId?: string): Promise<unknown>;
   preloadModel(modelId?: string): Promise<unknown>;
   getWarmupStatus(modelId?: string): Promise<unknown>;
   startWarmup(modelId?: string): Promise<unknown>;
   scheduleWarmup(modelId?: string, delayMs?: number): Promise<unknown>;
   transcribeFile(path: string, modelId?: string): Promise<FileTranscriptionResult>;
-  annotateFile(path: string, options?: AnnotationOptions): Promise<FileAnnotationResult>;
+  listAnnotationModels(): Promise<AnnotationModelInfo[]>;
+  annotateFile(path: string, options: AnnotationOptions): Promise<FileAnnotationResult>;
   synthesize(text: string, options?: SynthesisOptions): Promise<SynthesisResult>;
   getLiveSessionStatus(): Promise<LiveSessionStatus | null>;
   cancelLiveSession(sessionId?: string): Promise<{ cancelled: boolean; sessionId: string }>;
@@ -1909,6 +2432,17 @@ interface SynthesisResult {
   speechTiming?: SpeechTiming;
 }
 ```
+
+## Scoped TTS credentials
+
+Synthesis accepts request-local OpenAI, ElevenLabs, NVIDIA, Groq and Gemini keys
+in `SynthesisOptions.credentials`. For example, send `ELEVENLABS_API_KEY` with an
+explicit ElevenLabs `modelId` and selected `voiceId`. The key is not installed in
+the daemon or reused for another request. Do not log options that contain keys.
+`listVoices(modelId, credentials)` supports selected-account ElevenLabs discovery
+and OpenAI's static catalog. An explicit model is required for scoped discovery;
+built-in providers that do not support it return an error rather than ignoring the key.
+See [provider credential rules](./providers.md).
 
 ## Error handling
 
@@ -1958,6 +2492,14 @@ On the daemon side, set `VOX_PORT` or `VOX_HOST` environment variables to overri
 - call `listVoices(modelId)` before pinning a TTS voice in product code
 - benchmark with representative audio clips and read `inferenceMs` separately from `totalMs`
 - preserve raw transcription and synthesis metrics in your own telemetry if the app already exports traces
+
+## App-captured PCM streaming
+
+Call `preloadModel(modelId)` explicitly, then `startPCMStream(modelId)`. Feed mono 16 kHz `Float32Array` packets with `appendPCMStream(sessionId, sequence, samples)`. Each packet contains 1–16000 finite samples. Await the acknowledgement and use its `nextSequence` before sending another packet. Read cumulative text, approximate word timings, and endpoint notifications from `updates`.
+
+Call `finishPCMStream(sessionId)` to flush and return the final transcript. Call `cancelPCMStream(sessionId)` to discard pending audio and text. `nativeStreamingStatus()` exposes residency, ownership, and the encoder's planned ANE/CPU placement. An endpoint notification does not implicitly finish a session. Disconnect cancels ownership; reconnect requires a new session. See the [wire contract](./runtime.md#pcm-wire-contract).
+
+Cloud annotation requires an explicit model and request-scoped vendor credential. See [file annotation](./runtime.md#file-annotation) for options, nullable evidence, upload limits and cancellation. `AnnotationOptions.timeoutMs` defaults to 3,600,000 ms.
 
 # Web Integration (Companion Client)
 
@@ -2233,6 +2775,7 @@ Current emitted performance routes:
 
 - `transcribe.file`
 - `transcribe.live`
+- `transcribe.streaming`
 - `synthesize.generate`
 - `synthesize.startSession`
 
@@ -2286,6 +2829,14 @@ vox perf dashboard --client vox-cli
 - Large `modelLoadMs` spikes are warm-up events, not inference regressions.
 
 See [Runtime](./runtime.md) for emitted routes and [API](./api.md) for the current performance sample shape.
+
+## Native ASR measurements
+
+Build `vox-asr-bench` with `swift build --package-path swift -c release --product vox-asr-bench`. It accepts a model id, an explicit streaming model bundle directory, and a mono 16 kHz WAV. A directory of WAV files with matching `.txt` references produces a multi-utterance report. Batch `parakeet:v3` uses its installed `VOX_HOME` cache rather than the directory argument.
+
+The JSON report separates preload and priming from dictation. It reports process `phys_footprint` in decimal MB, per-chunk latency, input-audio time at the first partial, unpaced compute time to that partial, and the encoder's compute-plan placement. Add `--paced` to feed capture packets in real time and measure wall-clock first-partial latency. Unpaced compute time is not user-perceived latency. WER scoring lowercases text and removes punctuation; it does not normalize abbreviations or number spellings.
+
+These measurements exclude other processes and system-wide accelerator memory. Compare candidates on the same audio, host, and build configuration. A small smoke corpus is not a production accuracy evaluation.
 
 # Architecture
 
@@ -2415,6 +2966,7 @@ Catalog JSON may include `plugins[]`. Plugin install is a CLI file-system action
 
 ### Transcription
 
+- `transcribe.stream.start`, `transcribe.stream.append`, `transcribe.stream.finish`, `transcribe.stream.cancel`, `transcribe.stream.status` (app-captured PCM; [wire contract](./runtime.md#pcm-wire-contract))
 - `transcribe.file`
 - `transcribe.startSession`
 - `transcribe.sessionStatus`
@@ -2423,7 +2975,8 @@ Catalog JSON may include `plugins[]`. Plugin install is a CLI file-system action
 
 ### Annotation
 
-- `annotate.file`
+- `annotation.models` (explicit cloud capability inventory)
+- `annotate.file` ([request, evidence and limits](./runtime.md#file-annotation))
 
 ### History
 
@@ -2449,6 +3002,7 @@ type PerformanceRoute =
   | "annotate.file"
   | "transcribe.file"
   | "transcribe.live"
+  | "transcribe.streaming"
   | "synthesize.generate"
   | "synthesize.startSession"
   | string;
@@ -2492,6 +3046,7 @@ Current emitted performance routes:
 - `transcribe.file`
 - `annotate.file`
 - `transcribe.live`
+- `transcribe.streaming`
 - `synthesize.generate`
 - `synthesize.startSession`
 
@@ -2628,7 +3183,10 @@ interface AttributedWordTiming {
   word: string;
   start: number;
   end: number;
-  confidence: number;
+  confidence: number | null;
+  logProbability?: number | null;
+  speakerConfidence?: number | null;
+  language?: string | null;
   speakerId?: string | null;
 }
 
@@ -2654,6 +3212,18 @@ interface FileAnnotationResult {
   metrics?: AnnotationMetrics;
   words: AttributedWordTiming[];
   speakers: SpeakerSegment[];
+  providerId?: string | null;
+  providerRequestId?: string | null;
+  providerModelIds?: string[];
+  duration?: number | null;
+  durationSource?: string | null;
+  language?: string | null;
+  languageConfidence?: number | null;
+  languages?: string[];
+  audioEvents?: Array<{label: string; start: number; end: number; speakerId?: string | null; logProbability?: number | null}>;
+  speakerSegmentsSource?: string | null;
+  unsupportedFields?: string[];
+  unavailableFields?: string[];
 }
 
 interface SynthesisOptions {
@@ -2900,8 +3470,13 @@ Source: docs/agent/api.agent.md
 - live transcription has start, status, stop, and cancel routes
 - synthesis has voices, generate, session start, status, and cancel routes
 - `createLiveSession()` is synchronous and returns `VoxLiveSession`
-- synthesis options include optional speech timing and allowlisted OpenAI/NVIDIA/Groq/Gemini credentials; ElevenLabs and MiniMax keys are not lent per-request
+- synthesis options include optional speech timing and allowlisted OpenAI/ElevenLabs/NVIDIA/Groq/Gemini credentials; MiniMax keys are not lent per-request
 - performance samples preserve `clientId`, `route`, `modelId`, and optional `voiceId`
+
+- Native PCM routes: transcribe.stream.start|append|finish|cancel|status, separate from microphone startSession. See runtime brief for full identity/sequence/PCM contract.
+- SDK: startPCMStream, appendPCMStream, finishPCMStream, cancelPCMStream, nativeStreamingStatus.
+
+- annotation.models lists elevenlabs:scribe_v2 and deepgram:nova-3 capability/credential requirements; annotate.file requires explicit cloud ID and selected request key. See runtime brief for options/null scores/events/provenance/limits; no implicit cloud default, no ambient key fallback.
 
 # Apple Embed Facts
 
@@ -2948,7 +3523,7 @@ Source: docs/agent/apple-embed.agent.md
 
 ## Default embed engines
 
-- ASR default: `EngineManager()` -> `ParakeetProvider()`
+- ASR default: `EngineManager()` -> `NativeASRProvider()` (batch Parakeet + explicit native streaming models)
 - TTS generation default: `TTSEngineManager()` -> `TTSProviderRegistry` with every built-in provider (OpenAI, ElevenLabs, MiniMax, NVIDIA, Groq, Gemini, AVSpeech); routes by model id, never falls back between providers
 - TTS playback is not on `TTSProvider`; optional Apple playback is `AppleSpeechOutputController`
 - default ASR model id: `parakeet:v3`
@@ -3014,8 +3589,7 @@ Source: docs/agent/apple-embed.agent.md
 
 - `VoxDictation` covers dictation only; `VoxAppleSpeech` is separate playback
 - no microphone capture on iOS yet
-- no public embed live-session coordinator yet (no partial text while recording)
-- no raw-buffer ASR API yet
+- `VoxDictation` remains record-then-transcribe; use `NativeStreamingASR.shared` for PCM partials
 - no automatic telemetry recording outside `VoxDictation`
 - `VoxAppleSpeech` does not own browser playback or app product policy
 
@@ -3035,6 +3609,32 @@ Xcode copies SwiftPM resource bundles automatically. When packaging by hand, cop
 `SpeechEngineResources` resolves the model catalog and mlx-audio provider script
 from that location in apps, and from SwiftPM resources in command-line builds.
 A packaged app does not fall back to a developer build directory.
+
+## Native streaming
+
+- `NativeStreamingASR.shared` is exported by VoxEngine; Apple Silicon, macOS 14.4 / iOS 17.4+.
+- Explicit install / preload; default streaming id from StreamingASRDefaults.modelId.
+- `preload(modelId:directory:language:progress:)` supports an explicit offline bundle.
+- `begin(clientId:modelId:)` -> UUID; requires ready model; one owner.
+- `append(sessionId:clientId:samples:)` -> [StreamingASRUpdate]; 1–16000 finite mono 16 kHz float32 samples, await each call.
+- `finish(sessionId:clientId:)` flushes -> final update; cancel discards.
+- Cumulative text, approximate RNNT words, explicit endpointSource; endpoints do not auto-stop.
+- Process-wide residency shared with batch; idle unload macOS 900 s / iOS 60 s, configurable; native ASRModelInfo.idleUnloadSeconds reports the actual value. Preload again after eviction or model switch; bounded desktop retention does not fix compiler stalls.
+- `status()` exposes actual planned encoder placement from MLComputePlan, not requested computeUnits or a hardware trace.
+- Several app processes intentionally share one voxd private authenticated Unix endpoint; do not load separate engines per app.
+
+## Embedded Parakeet ownership
+
+- Keep a concrete ParakeetProvider, optionally inject it into EngineManager. iOS embeds VoxCore/VoxEngine, no local daemon/transport/FluidAudio. Explicit batch ID parakeet:v3.
+- await models(): filesystem metadata + actual runtime snapshot, no writes/download/load/Core ML compilation. modelDirectory(modelId:) throws -> URL is read-only location; do not manually delete paths.
+- install(modelId:progress:) is now download-only (earlier versions also warmed); preload(modelId:progress:) explicitly loads, verifies encoder ANE placement and primes. Installed != preloaded. Same-model install/load are single-flight; cancelled waiter does not stop shared initialization.
+- unload(modelId:) async throws -> ASRModelInfo releases actual shared Session/model closures, not just a provider reference. Metadata actors remain cached. Snapshot preloaded=false, placement=nil; other providers see it. Not an OS cache/RSS purge.
+- deleteModel(modelId:) async throws -> ASRModelInfo unloads then deletes only selected Vox-owned revision, no siblings/root/FluidAudio/system caches. Missing directory idempotent; filesystem failure may leave partial deletion + unloaded runtime, so refresh status.
+- Both reject admitted install/warmup/file-preparation/inference via ParakeetLifecycleError.busy; no stealing leases. Reservations are process-local, not cross-process store locks. Mac shared apps still use voxd.
+- setIdleUnload(modelId:seconds:): finite nonnegative seconds, zero disables; production default macOS 900 s / iOS 60 s, env VOX_ASR_IDLE_SECONDS. Native ASRModelInfo reports actual idleUnloadSeconds. Shared process/model scope. Idle cannot interrupt active runtime work.
+- Store deletion: descriptor-relative no-follow walk below trusted Vox home, receipts bind model/repo/revision; known built-in legacy layouts allowed, unknown custom unreceipted nonempty directories/alias receipts rejected. Do not hardcode cache manifests in callers.
+- Cached engine conversion is process-selected; catalog refresh does not hot-swap it. Restart for conversion updates.
+- examples/parakeet-lifecycle public native consumer compiles for ARM64 iOS Simulator in CI (entire VoxEngine, not only VoxClient). Simulator available=false; hardware ANE requires iOS17.4+/macOS14.4+. No iOS device footprint/placement/accuracy claimed.
 
 # Architecture Facts
 
@@ -3072,7 +3672,7 @@ Source: docs/agent/models.agent.md
 - native core ASR: `apple:speech-transcriber` on macOS 26+
 - Apple locale env: `VOX_APPLE_SPEECH_LOCALE`
 - recommended MLX candidates: `mlx-community/Qwen3-ASR-1.7B-8bit`, `mlx-community/cohere-transcribe-03-2026-mlx-8bit`, `mlx-community/nemotron-3.5-asr-streaming-0.6b-8bit`
-- catalog capability flags describe the current Vox provider surface; `liveTranscription=false` until the ASR protocol and mic path emit model-backed partials
+- Native coreml-streaming models have liveTranscription=true through NativeStreamingASR.shared / transcribe.stream.*; file-only models remain false. Old daemon-microphone startSession remains record-then-transcribe.
 - never add hand-written resampling or denoising inside a model adapter; use platform/provider DSP libraries
 - OpenAI file ASR: `gpt-transcribe`, `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, `whisper-1`
 - plugins CLI: `vox plugins list|install|remove`
@@ -3087,6 +3687,15 @@ Source: docs/agent/models.agent.md
 - Whistle adapter uses Symphonia/Rubato for audio conversion; `liveTranscription=false`
 - Whistle assets: `VOX_HOME/models/whistle`; transcribe can cold-load installed assets but cannot download them
 - Whistle env: `VOX_WHISTLE_LANGUAGE` (en/de/fr/es/it/nl/pl, unset auto), `VOX_WHISTLE_KEYWORDS` (comma-separated)
+
+- Native ASR requires Apple Silicon, macOS 14.4 / iOS 17.4 for compute-plan verification.
+- Default live id: StreamingASRDefaults.modelId; file default: parakeet:v3, pinned 7dd20fe (August 19 conversion).
+- Models/preload surfaces include planned computePlacement; streaming status exposes residency and owner.
+- CoreML streaming installation is disk-only; preload explicitly loads/primes; idle unload default macOS 900 s / iOS 60 s; native inventory exposes actual idleUnloadSeconds.
+- Batch and streaming share one process-wide native model slot; multiple app processes use one authenticated private Unix host.
+
+- Current live default: nemotron:unified-560ms (Nemotron Labs Unified, Oct 28 conversion bd13ddd); 160 ms stride + 400 ms right context, buffered re-encode, not encoder-cache streaming.
+- Nemotron 3.5 Latin cache-aware alternative: nemotron:streaming-560ms, 560 ms chunks.
 
 # Observability Facts
 
@@ -3108,6 +3717,11 @@ Source: docs/agent/observability.agent.md
   - `modelId`
   - `voiceId` for synthesis
 
+- Native streaming performance route: `transcribe.streaming`, preserving clientId/modelId.
+- `vox-asr-bench` (Swift executable) reports physical process footprint, per-chunk latency, first partial by input-audio time and unpaced compute time, planned placement, and normalized WER when references exist.
+- Benchmark takes model id, explicit streaming model directory (batch uses installed VOX_HOME cache), and a mono 16 kHz WAV or a directory of WAV + matching .txt references. Use `--paced` for wall-clock first-partial latency.
+- Run a release build; distinguish cold preload/ANE compile time from warm inference, and process footprint from system-wide accelerator memory.
+
 # Vox Facts
 
 Source: docs/agent/overview.agent.md
@@ -3118,7 +3732,7 @@ Source: docs/agent/overview.agent.md
 - deployment modes:
   - embed mode: Swift packages inside the app process
   - companion mode: `voxd` for web, browser, and shared-process clients
-- default ASR embed engine: `EngineManager()` -> `ParakeetProvider()`
+- default ASR embed engine: `EngineManager()` -> `NativeASRProvider()` (batch Parakeet + explicit native streaming models)
 - default TTS embed engine: `TTSEngineManager()` -> `TTSProviderRegistry`
 - optional Apple TTS playback: `VoxAppleSpeech` / `AppleSpeechOutputController`
 - companion service: `VoxRuntimeService`
@@ -3157,7 +3771,7 @@ Source: docs/agent/providers.agent.md
 - NVIDIA Magpie: model `magpie-tts-multilingual`, `NV_API_KEY`/`NVIDIA_API_KEY`, LINEAR_PCM 44.1 kHz, dynamic `list_voices`, reject >2000 chars
 - Groq Orpheus: WAV `response_format`, 200-character limit, `GROQ_API_KEY`, require structurally valid WAV
 - Gemini TTS: Generate Content AUDIO for 2.5 and `gemini-3.1-flash-tts-preview`, wrap `audio/L16` as WAV, `GEMINI_API_KEY`/`GOOGLE_API_KEY`, voice `Rasalgethi`
-- per-request `credentials` allowlist: OpenAI, NVIDIA, Groq, Gemini/Google only; never ElevenLabs/MiniMax; never log keys
+- per-request `credentials` allowlist: OpenAI, ElevenLabs, NVIDIA, Groq, Gemini/Google; never MiniMax; never log keys
 - explicit empty/whitespace provider env key or alias fences process credential fallback for resolution and default model selection; process env is used only when that key is absent from `env`
 - NVIDIA Magpie, Groq, and Gemini synthesis HTTP errors redact the exact request text; JSON diagnostics keep secret redaction; plain-text bodies fail closed whenever synthesis sensitive values are supplied; voice discovery has no prompt; older providers keep their existing error surfaces
 - remote providers participate in defaults only when configured; aliases such as `magpie`/`groq-tts`/`google-tts` block canonical default overwrite
@@ -3166,7 +3780,7 @@ Source: docs/agent/providers.agent.md
 - provider state may cache weights, but crash/restart must remain safe
 - canonical implementations: `swift/Sources/HudsonSpeechEngine/` built-in providers plus `ExternalProvider.swift` and `ExternalTTSProvider.swift`
 - published catalog: `https://voxd.cc/data/models.json` from repo `data/models.json`
-- catalog families the engine can run: `parakeet-tdt`, `apple-speech`, `mlx-audio`, `openai-transcribe`
+- catalog families the engine can run: `coreml-streaming`, `parakeet-tdt`, `apple-speech`, `mlx-audio`, `openai-transcribe`
 - catalog plugins: `plugins[]` plus model `plugin` id; install writes `~/.vox/plugins/<id>/provider.json`
 - Gemma 4 E2B: plugin `mlx-vlm`; `vox plugins install mlx-vlm`
 - Whistle: optional `whistle` plugin/model, prebuilt Needle runtime in a separate Rust process; file ASR <=30 seconds, word timings, no live partials
@@ -3187,10 +3801,22 @@ Source: docs/agent/providers.agent.md
 - native alternative: `apple:speech-transcriber`
 - MLX shortlist: Qwen3-ASR 1.7B, Cohere Transcribe 03-2026, Nemotron 3.5 ASR Streaming 0.6B
 - supported architecture: Apple Silicon (`arm64`) only; no Intel support
-- current provider `transcribe` is file-based; do not claim model-backed partials from upstream streaming capability
+- ASRProvider.transcribe / external provider transcribe remain file-based. NativeStreamingASR.shared and transcribe.stream.* are a separate native PCM surface with model-backed partials.
 - model adapters use platform/provider audio conversion; never add hand-written resampling or denoising
 - remote OpenAI ASR: `gpt-transcribe`, `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, `whisper-1`
 - override catalog URL with `VOX_MODEL_CATALOG_URL`
+
+- ElevenLabs: scoped credentials.ELEVENLABS_API_KEY (elevenlabsApiKey / elevenlabs_api_key aliases) for synthesis and RPC voices with explicit modelId; request-local key wins, never mutates config/env/credential store or subsequent requests. OpenAI static voices also support scoped keys; other unsupported scoped voice providers error.
+- ElevenLabs uses an ephemeral no-cache/cookie/credential-storage session by default and no-store requests. HTTP errors return status only, no vendor body; non-WAV success bodies rejected. Default output_format=wav_44100, not invalid wav_44100_128; account tier gates apply, no automatic fallback. Inventories reflect configured keys, not borrowed keys. Browser HTTP voice-list route does not accept credentials in URLs.
+
+- Scoped voice credentials forwarding is verified for bundled voxttsd; third-party external adapters must honor that protocol themselves. Lend only the selected provider key, not a whole credential store.
+
+- Parakeet batch words are grouped SentencePiece/whitespace spans after chunk merge, punctuation attached, min/max token bounds and min piece confidence. 80 ms TDT estimates, not forced alignment/calibrated word posterior; no fake missing-vocab labels or truncated alignment arrays.
+
+- External TTS cancellation opt-in: ProviderEntry.supportsRequestCancellation=true; stock voxd sets it for matching bundled voxttsd. Absent/false preserves legacy wire behavior, local cancellation only.
+- Internal notification: {jsonrpc:"2.0",method:"$/cancelRequest",params:{id:<numeric transport call ID>}}, no outer ID/ack. Not request UUID/model/client ID. Unknown IDs ignored, cancelled helper calls may reply -32800 request_cancelled; late host replies ignored. No process kill/restart.
+- Helper: dedicated bounded POSIX stdin reader (1 MiB frames), actor registry <=16 accepted tasks, concurrent HTTP/control processing, serialized output. Parent EOF cancels/drains. Host serializes writes and removes continuations once on cancellation/timeout. Extension not wired to external ASR.
+- OpenAI TTS HTTP errors now status-only, never vendor body; ephemeral default session, no-store. Existing logs untouched. scripts/test-private-tts.py verifies private same-user transport, scoped errors/keys and cancellation while another client's request succeeds on unchanged helper PID, no paid calls.
 
 # Quickstart Facts
 
@@ -3234,8 +3860,78 @@ Source: docs/agent/runtime.agent.md
 - Private host mode: pass `socketPath` plus `authToken` to `VoxRuntimeService` or `ServiceBridge`; no TCP listener opens.
 - Private clients send `x-lattices-token` before WebSocket upgrade, with `Host: localhost` and path `/`; browser Origin headers are rejected.
 - Private transport checks peer UID, uses directory `0700` and socket `0600`, and rejects symlink paths.
-- Private registry metadata includes `socketPath` and `port: 0`; host capability discovery owns this mode. Standalone CLI/browser TCP behavior is unchanged.
+- Private registry metadata includes `socketPath` and `port: 0`; VoxRuntimeService publishes the owner-only capability. A raw ServiceBridge host can use PrivateRuntimeRegistration. TypeScript TCP discovery refuses private capabilities.
 - Frame bounds: 16 MiB inbound, 32 MiB queued outbound; connection ID and client ID still own sessions.
+
+## Native app-captured PCM
+
+- Default streaming model: `StreamingASRDefaults.modelId`; batch default stays `parakeet:v3`.
+- Install and preload explicitly with `models.install` / `models.preload`; start never downloads or warms.
+- Routes: `transcribe.stream.start|append|finish|cancel|status`; separate from the old daemon-microphone sessions.
+- Start: clientId + modelId -> sessionId, 16 kHz mono float32le, nextSequence=0, maxPacketSamples=16000.
+- Append: clientId + sessionId + sequence + audioBase64; await ack nextSequence + updates[] before next packet.
+- Updates: cumulative text, words (seconds), processedAudioMs, chunkLatencyMs, endOfUtterance, optional endpointSource.
+- Word timings are greedy RNNT emission frames, not forced alignment.
+- Endpoint source: `model` for Parakeet EOU; `blank-duration` for Nemotron (1120 ms); endpoint does not auto-stop.
+- Finish flushes -> result; cancel discards -> cancelled, no final transcript.
+- Connection AND clientId AND sessionId own mutation; disconnect cancels; 120 s session limit.
+- One acknowledged packet in flight; no uncertain append retries; reconnect means new session.
+- Shared native model slot spans batch and streaming; exclusive active lease; unload previous before switching.
+- MLComputePlan verifies ANE compute placement after load, retries once, fails closed; planned placement, not execution trace.
+- Native idle unload default macOS 900 s / iOS 60 s; VOX_ASR_IDLE_SECONDS overrides, explicit 0 disables. Native models.list entries expose actual idleUnloadSeconds; preload again after eviction. One slot and active-work protections unchanged.
+- Desktop retention reduces eviction churn, not compiler latency. CoreML load stage logs split component model-load and encoder compute-plan (started/completed/failed, attempt, elapsedMs); no raw error bodies. Same-model reload stall remains unproven fixed; see reports/idle-reload-2026-10-30.md.
+- Private Unix transport is intentional cross-process mode for Talkie and other app processes.
+
+- Standalone voxd --private: default ~/.vox/voxd.sock, fresh system-random 256-bit token, no TCP listener. VOX_SOCKET_PATH overrides path; optional explicit VOX_AUTH_TOKEN overrides token. No token in argv, process env or launchd plist is needed.
+
+- Current StreamingASRDefaults.modelId: nemotron:unified-560ms; new Native provider is included when loading legacy custom ASR provider configurations unless the same provider id is explicitly configured.
+
+## Swift companion client
+
+- Product/module `VoxClient`, public actor `VoxDaemonClient(clientId:)`; depends only on VoxCore, no engines/resources. Root and nested Swift manifests export it.
+- Explicit `connect(.unix(socketPath:authToken:))`; Unix path/ownership/permission/peer UID checks, authenticated and validated WebSocket upgrade. No launch, reconnect or fallback; connectDiscovered reads the private host capability.
+- `VoxEndpoint.runtime(_:authToken:allowTCP:tcpHost:)` requires allowTCP=true for TCP metadata; direct `.tcp(host:port:authToken:)` is explicit opt-in, unencrypted trusted-loopback use.
+- Typed `startPCMStream(modelId:)`, `appendPCMStream(sessionId:sequence:samples:)`, `finishPCMStream(sessionId:)`, `cancelPCMStream(sessionId:)`, `nativeStreamingStatus()`; shared DTOs re-exported from VoxCore.
+- Generic Sendable Codable JSONValue from listModels/listCatalog/installModel/preloadModel/transcribeFile; `call(_:params:timeout:onProgress:)` exposes other existing routes, overrides clientId with owned identity.
+- Progress VoxRPCProgress callback must return promptly; UI work goes to MainActor. Install timeout 1800 s; preload/file default 300 s; preloadModel(_:timeout:onProgress:) permits an explicit cold-readiness budget, e.g. 600 s; other calls 30 s.
+- One typed append/finish in flight per session; 64 pending RPC limit; 16 MiB messages/32 MiB Unix queued output. Cancel remains callable during append/finish.
+- Request task cancellation/timeout closes connection and fails all pending calls, never retries uncertain work; not a server download-cancel capability. Explicit reconnect starts a new session.
+- No new capability negotiation, VAD, confirmed boundaries, hints, model delete/download cancellation, language field, or streaming diarization. File annotation uses explicit request-authenticated Scribe/Deepgram cloud models; one-shot generate has disconnect cancellation, not a per-request cancel RPC.
+
+## Private capability discovery
+
+- Official private bootstrap: voxd --private generates/publishes its own credential; explicit env pair remains supported. No daemon/client auto-launch or production launch-service replacement.
+- Private mode atomically publishes VOX_RUNTIME_PATH, else VOX_HOME/runtime.json, else ~/.vox/runtime.json. Parent 0700, same-user regular file 0600, nlink=1, 64 KiB maximum; symlink-safe reads/writes and same-UID socket peer check.
+- Root fields: schemaVersion=1, transport=unix+ws+json-rpc, instanceId UUID, socketPath absolute, authToken inline, port=0, plus existing version/serviceName/pid/startedAt metadata. startedAt keeps JSONEncoder seconds-since-2001 representation. No authTokenPath.
+- VoxEndpoint.discovered() / VoxDaemonClient.connectDiscovered(): explicit env endpoint+token pair wins; either present requires both nonempty; otherwise secure capability file. No missing/invalid/TCP fallback, no daemon launch.
+- One private runtime publisher lease; publication failure stops new listener; stop removes only its own instance. Distinct test hosts need distinct VOX_RUNTIME_PATH.
+- RuntimeRegistry.read and health return metadata, never credentials. Never log raw capability JSON. TypeScript TCP discovery/CLI refuse private files rather than connecting/launching another TCP daemon; private TS transport is not implemented.
+
+- Scoped ElevenLabs credentials.ELEVENLABS_API_KEY supported for synthesize.generate/startSession and voices with explicit modelId, through in-process or bundled voxttsd. No mutation/persistence of lent key, no retry against another account; inventory stays configured-only. OpenAI static voices also accept scoped keys; unsupported scoped voice providers error. Never send keys via voice-list query URLs. Swift VoxClient uses generic call, no engine dependency.
+
+- PrivateRuntimeConfiguration.resolve parses --private / VOX_SOCKET_PATH; default socket VOX_HOME/voxd.sock, system CSPRNG 32-byte token, optional validated explicit auth override; invalid/empty explicit config and --port conflict fail. Generated secrets never enter process environment or logs; client incomplete-env-pair rules stay strict.
+- Private publication checks prior owner PID before replacing legacy 0644 metadata: live PID blocks startup and rolls back listener; only a stale same-user record can upgrade to 0600 capability. Malformed/unsafe metadata fails. Never hand-write a token/chmod an active legacy record as a workaround. Operator stops/reconfigures the existing host deliberately; isolated tests use their own VOX_HOME/runtime path.
+
+- Native Parakeet batch words now group SentencePiece/whitespace-delimited pieces, punctuation attached. Older revisions returned BPE pieces. Start/end=min/max contributing token intervals, confidence=min piece score; 80 ms decoder-frame estimates, not forced alignment/calibrated word posterior. Multiword pieces share source interval; missing vocab skipped, malformed alignment arrays return no timings. Grouping runs after long-file chunk merge.
+
+## Cloud file annotation
+
+- `annotation.models` inventory, `annotate.file` upload; explicit `elevenlabs:scribe_v2` / `deepgram:nova-3`, no cloud default. Default AnnotationManager is RemoteAnnotationProvider; old placeholder errors.
+- `credentials.ELEVENLABS_API_KEY` / `DEEPGRAM_API_KEY` apply to one request only. No ambient fallback, account cache or global mutation. Same private capability and VoxClient, no engine dependency. Never log keys.
+- `listAnnotationModels()` -> [AnnotationModelInfo]; `annotateFile(path:modelId:credentials:diarize:tagAudioEvents:languageCode:numSpeakers:timeout:)` -> AnnotationOutput, default 3600 s. Cancel disconnects and aborts own uploads; cannot undo vendor work/billing.
+- `diarize` defaults true. Scribe events default true; numSpeakers 1–32 requires diarize. Deepgram events/count hints error before upload. Optional languageCode is not echoed as detected language. Cloud providers reject text/words alignment hints.
+- Words have nullable confidence/logProbability/speakerConfidence. Scribe preserves logprob, no exponentiation; Deepgram preserves scores. Scribe speaker IDs unchanged; Deepgram integers become decimal strings. Missing times error. Events separate from speech; spacing ignored.
+- Scribe speaker spans: word-span-derived; Deepgram: vendor-utterances else word-span-derived. No invented aggregate confidence or acoustic VAD. Duration vendor else actual media metadata, source explicit, otherwise error. No fake vendor IDs/language. unsupportedFields vs unavailableFields distinguish limits from missing response evidence.
+- Two active uploads maximum; overflow errors busy. Input <=2,000,000,000 B, disk-streamed in 64 KiB chunks to 0700 dir/0600 file then removed. Response <=4 MiB, result <=8 MiB. Ephemeral HTTP, no caches/cookies/auth storage, no redirects/application retries. HTTP errors expose status only. Vendor retention, accuracy and account access unverified.
+- Host-only complete endpoint overrides `VOX_ANNOTATION_ELEVENLABS_URL` / `VOX_ANNOTATION_DEEPGRAM_URL`: HTTPS or loopback HTTP, no query/fragment/userinfo. Invalid override fails closed. Never client-controlled.
+- Integration: `xcrun swift build --package-path swift --product voxd`; `python3 scripts/test-private-annotation.py`. Isolated private daemon, two model-free clients, loopback fixtures only. No paid calls or installed runtime changes. Native ASR unaffected.
+
+- Deepgram multilingual languages live on the selected alternative; preserve its list plus per-word words.language. Do not infer detected language from the list. Scribe per-word language is unsupported.
+
+- TTS privacy: OpenAI/ElevenLabs HTTP errors expose status only, never vendor bodies; OpenAI defaults ephemeral/no cache/cookies/credential storage, no-store requests. Old persisted logs are not rewritten.
+- Generation + authenticated voices use connection-owned tickets reserved before task launch. Client disconnect cancels only its own work. Separate client connections for independent cancellation; no public one-shot cancel RPC.
+- Stock bundled helper propagates task cancellation/transport timeout by numeric JSON-RPC ID through ExternalTTSProvider/StdioTransport to HTTP. Shared process and other calls survive. Custom TTS requires supportsRequestCancellation=true; absent/false cancels local wait only. Never kill shared provider to cancel one call.
+- Regression: scripts/test-private-tts.py, two model-free clients, stock private daemon/helper, loopback vendors only, reflected-key errors/non-retention, concurrent client A cancellation + B survival, unchanged helper PID, clean EOF. Real vendor stop/retention/refund not guaranteed. See reports/tts-privacy-cancellation-2026-10-30.md.
 
 # SDK Facts
 
@@ -3258,7 +3954,14 @@ Source: docs/agent/sdk.agent.md
 - annotation method exposed: `annotateFile`
 - live session method exposed: `createLiveSession`; it returns `VoxLiveSession` synchronously
 - synthesis can return optional `speechTiming`; read the types in `packages/client/src/types.ts` before duplicating shapes
-- per-request `credentials` are allowlisted for OpenAI, NVIDIA Magpie, Groq, and Gemini/Google only
+- per-request `credentials` are allowlisted for OpenAI, ElevenLabs, NVIDIA Magpie, Groq, and Gemini/Google
+
+- Native PCM: preloadModel explicitly, startPCMStream(modelId), appendPCMStream(sessionId,sequence,Float32Array) -> nextSequence+updates, finishPCMStream -> final update, cancelPCMStream -> discard, nativeStreamingStatus.
+- 1–16000 finite mono 16 kHz samples; await each packet acknowledgement; no uncertain retries; cumulative text + approximate word timestamps + endpointSource.
+
+- listVoices(modelId, credentials?) forwards selected-account credentials on that call only; explicit model required with keys. ElevenLabs dynamic voices and OpenAI static catalog support this; other unsupported providers error. Never log credentials; inventory availability stays daemon-configured, not borrowed-account state.
+
+- listAnnotationModels + annotateFile(path, AnnotationOptions) with required explicit modelId, scoped credentials.ELEVENLABS_API_KEY / DEEPGRAM_API_KEY, diarize/tagAudioEvents/languageCode/numSpeakers; timeoutMs default3600000. Nullable confidence, raw logProbability, speakerConfidence; preserve audioEvents, language/duration/provenance and unsupported/unavailable fields. See runtime brief. TS transport remains TCP-only.
 
 # Operations Facts
 

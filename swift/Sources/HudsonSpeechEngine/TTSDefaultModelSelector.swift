@@ -56,8 +56,8 @@ public enum TTSDefaultModelSelector {
             return hasValue(entry.env?["OPENAI_API_KEY"])
                 || hasValue(environment["OPENAI_API_KEY"])
         case .elevenlabs:
-            return hasValue(entry.env?["ELEVENLABS_API_KEY"])
-                || hasValue(environment["ELEVENLABS_API_KEY"])
+            return ElevenLabsTTSProvider.resolveAPIKey(providerCredentials: [:], env: entry.env,
+                processEnv: environment) != nil
         case .minimax:
             return hasValue(entry.env?["MINIMAX_API_KEY"])
                 || hasValue(environment["MINIMAX_API_KEY"])

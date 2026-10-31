@@ -49,6 +49,8 @@ export interface DoctorReport {
 }
 
 export interface ModelInfo {
+  idleUnloadSeconds?: number | null;
+  computePlacement?: CoreMLPlacement | null;
   id: string;
   name: string;
   backend: string;
@@ -81,6 +83,7 @@ export interface SpeechModelCatalogEntry {
   source?: {
     type: string;
     repo?: string;
+  revision?: string;
   };
 }
 
@@ -149,8 +152,11 @@ export interface AttributedWordTiming {
   word: string;
   start: number;
   end: number;
-  confidence: number;
+  confidence: number | null;
   speakerId?: string | null;
+  language?: string | null;
+  logProbability?: number | null;
+  speakerConfidence?: number | null;
 }
 
 export interface FileTranscriptionResult {
@@ -177,6 +183,38 @@ export interface AnnotationMetrics {
   realtimeFactor: number;
 }
 
+export interface AnnotationAudioEvent {
+  label: string;
+  start: number;
+  end: number;
+  speakerId?: string | null;
+  logProbability?: number | null;
+}
+
+export interface AnnotationModelInfo {
+  id: string;
+  providerId: string;
+  nativeModelId: string;
+  remote: boolean;
+  capabilities: Record<string, boolean>;
+  requiresCredentials: string[];
+  unsupportedFields: string[];
+  maxInputBytes: number;
+}
+
+export interface AnnotationOptions {
+  modelId: string;
+  credentials?: Partial<Record<"ELEVENLABS_API_KEY" | "DEEPGRAM_API_KEY", string>>;
+  diarize?: boolean;
+  tagAudioEvents?: boolean;
+  languageCode?: string;
+  numSpeakers?: number;
+  /** Legacy custom-provider transcript alignment; cloud providers reject it. */
+  text?: string;
+  words?: WordTiming[];
+  timeoutMs?: number;
+}
+
 export interface FileAnnotationResult {
   modelId: string;
   text?: string;
@@ -184,6 +222,18 @@ export interface FileAnnotationResult {
   metrics?: AnnotationMetrics;
   words: AttributedWordTiming[];
   speakers: SpeakerSegment[];
+  providerId?: string | null;
+  providerRequestId?: string | null;
+  providerModelIds?: string[];
+  duration?: number | null;
+  durationSource?: string | null;
+  language?: string | null;
+  languageConfidence?: number | null;
+  languages?: string[];
+  audioEvents?: AnnotationAudioEvent[];
+  speakerSegmentsSource?: string | null;
+  unsupportedFields?: string[];
+  unavailableFields?: string[];
 }
 
 export interface TranscriptionMetrics {
@@ -209,6 +259,9 @@ export interface SynthesisOptions {
   instructions?: string;
   speechTiming?: boolean | SpeechTimingRequest;
   credentials?: {
+    ELEVENLABS_API_KEY?: string;
+    elevenlabsApiKey?: string;
+    elevenlabs_api_key?: string;
     OPENAI_API_KEY?: string;
     openaiApiKey?: string;
     openai_api_key?: string;
@@ -393,4 +446,44 @@ export interface TransportEvents {
   close: { code: number; reason: string };
   event: { event: string; data: Record<string, unknown> };
   error: { error: Error };
+}
+
+/** Planned Core ML encoder placement, not a hardware execution trace. */
+export interface CoreMLPlacement {
+  neuralEngineOperations: number;
+  cpuOperations: number;
+  gpuOperations: number;
+  unknownOperations: number;
+  neuralEngineComputeOperations: number;
+  cpuComputeOperations: number;
+  neuralEngineEstimatedCost: number;
+  cpuEstimatedCost: number;
+}
+
+export interface StreamingASRUpdate {
+  text: string;
+  words: WordTiming[];
+  endOfUtterance: boolean;
+  endpointSource?: "model" | "blank-duration";
+  processedAudioMs: number;
+  chunkLatencyMs: number;
+}
+
+export interface NativeStreamingStatus {
+  modelId?: string;
+  loadingModelId?: string;
+  placement?: CoreMLPlacement;
+  activeSessionId?: string;
+  clientId?: string;
+  idleUnloadSeconds: number;
+}
+
+export interface PCMStreamingSession {
+  sessionId: string;
+  modelId: string;
+  sampleRate: 16000;
+  channels: 1;
+  encoding: "float32le";
+  maxPacketSamples: 16000;
+  nextSequence: number;
 }

@@ -7,7 +7,12 @@ import { parseAttributedWordTimings, parseSpeakerSegments } from "./annotation.t
 import { parseWordTimings } from "./words.ts";
 import type {
   DoctorReport,
+  NativeStreamingStatus,
+  PCMStreamingSession,
+  StreamingASRUpdate,
   FileAnnotationResult,
+  AnnotationOptions,
+  AnnotationModelInfo,
   FileTranscriptionResult,
   HistoryListOptions,
   HistoryListResult,
@@ -69,6 +74,34 @@ export class VoxClient {
     );
   }
 
+  /** Capture belongs to the app. Explicitly preload a live model before starting. */
+  async startPCMStream(modelId = "nemotron:unified-560ms"): Promise<PCMStreamingSession> {
+    return await this.call("transcribe.stream.start", { modelId }) as unknown as PCMStreamingSession;
+  }
+
+  /** Await each acknowledgement before sending the next packet. Never retry an uncertain packet. */
+  async appendPCMStream(sessionId: string, sequence: number, samples: Float32Array): Promise<{ sessionId: string; nextSequence: number; updates: StreamingASRUpdate[] }> {
+    if (samples.length === 0 || samples.length > 16000 || !samples.every(Number.isFinite)) {
+      throw new Error("Expected 1–16000 finite mono 16 kHz float32 samples");
+    }
+    const bytes = Buffer.alloc(samples.length * 4);
+    for (let i = 0; i < samples.length; i++) bytes.writeFloatLE(samples[i]!, i * 4);
+    return await this.call("transcribe.stream.append", { sessionId, sequence, audioBase64: bytes.toString("base64") }) as unknown as { sessionId: string; nextSequence: number; updates: StreamingASRUpdate[] };
+  }
+
+  async finishPCMStream(sessionId: string): Promise<StreamingASRUpdate> {
+    const result = await this.call("transcribe.stream.finish", { sessionId });
+    return result.result as unknown as StreamingASRUpdate;
+  }
+
+  async cancelPCMStream(sessionId: string): Promise<void> {
+    await this.call("transcribe.stream.cancel", { sessionId });
+  }
+
+  async nativeStreamingStatus(): Promise<NativeStreamingStatus> {
+    return await this.call("transcribe.stream.status") as unknown as NativeStreamingStatus;
+  }
+
   async health(): Promise<Record<string, unknown>> {
     return this.call("health");
   }
@@ -96,8 +129,9 @@ export class VoxClient {
     return parseCatalog(result);
   }
 
-  async listVoices(modelId?: string): Promise<VoiceInfo[]> {
-    const result = await this.call("synthesize.voices", modelId ? { modelId } : undefined);
+  async listVoices(modelId?: string, credentials?: SynthesisOptions["credentials"]): Promise<VoiceInfo[]> {
+    const params = credentials ? { modelId, credentials } : modelId ? { modelId } : undefined;
+    const result = await this.call("synthesize.voices", params);
     return (result.voices as VoiceInfo[]) ?? [];
   }
 
@@ -174,40 +208,25 @@ export class VoxClient {
     };
   }
 
-  async annotateFile(
-    path: string,
-    options: {
-      modelId?: string;
-      text?: string;
-      words?: Array<{
-        word: string;
-        start: number;
-        end: number;
-        confidence: number;
-      }>;
-    } = {},
-  ): Promise<FileAnnotationResult> {
-    const modelId = options.modelId ?? "speaker-diarization:v1";
-    const result = await this.transport.call(
-      "annotate.file",
-      {
-        clientId: this.clientId,
-        path,
-        modelId,
-        text: options.text,
-        words: options.words,
-      },
-      STREAM_TIMEOUT_MS,
-    );
+  async listAnnotationModels(): Promise<AnnotationModelInfo[]> {
+    const result = await this.transport.call("annotation.models", { clientId: this.clientId });
+    return (result.models ?? []) as AnnotationModelInfo[];
+  }
 
+  async annotateFile(path: string, options: AnnotationOptions): Promise<FileAnnotationResult> {
+    const { timeoutMs, ...params } = options;
+    const result = await this.transport.call("annotate.file", {
+      ...params, clientId: this.clientId, path,
+    }, timeoutMs ?? 3_600_000);
     return {
-      modelId: String(result.modelId ?? modelId),
+      ...result,
+      modelId: String(result.modelId ?? options.modelId),
       text: typeof result.text === "string" ? result.text : undefined,
       elapsedMs: Number(result.elapsedMs ?? 0),
       metrics: parseAnnotationMetrics(result.metrics, Number(result.elapsedMs ?? 0)),
       words: parseAttributedWordTimings(result.words),
       speakers: parseSpeakerSegments(result.speakers),
-    };
+    } as FileAnnotationResult;
   }
 
   async synthesize(text: string, options: SynthesisOptions = {}): Promise<SynthesisResult> {

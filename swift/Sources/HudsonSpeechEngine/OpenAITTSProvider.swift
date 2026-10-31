@@ -30,8 +30,12 @@ public actor OpenAITTSProvider: TTSProvider {
     private let requestTimeout: TimeInterval
     private var preloadedModels: Set<String> = []
 
-    public init(env: [String: String]? = nil, session: URLSession = .shared) {
-        self.session = session
+    public init(env: [String: String]? = nil, session: URLSession? = nil) {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.urlCache = nil
+        configuration.urlCredentialStorage = nil
+        configuration.httpCookieStorage = nil
+        self.session = session ?? URLSession(configuration: configuration)
         self.apiKey = env?["OPENAI_API_KEY"]
             ?? ProcessInfo.processInfo.environment["OPENAI_API_KEY"]
         let rawBaseURL = env?["OPENAI_BASE_URL"]
@@ -72,6 +76,14 @@ public actor OpenAITTSProvider: TTSProvider {
         }
     }
 
+    public func voices(modelId: String?, providerCredentials: [String: String]) async throws -> [TTSVoiceInfo] {
+        let voices = try await voices(modelId: modelId)
+        guard RemoteTTSSupport.firstNonEmpty(providerCredentials["OPENAI_API_KEY"],
+            providerCredentials["openaiApiKey"], providerCredentials["openai_api_key"]) != nil else { return voices }
+        return voices.map { TTSVoiceInfo(id: $0.id, name: $0.name, language: $0.language,
+            backend: $0.backend, modelId: $0.modelId, available: true, isDefault: $0.isDefault) }
+    }
+
     public func preload(
         modelId: String,
         voiceId: String?,
@@ -96,6 +108,7 @@ public actor OpenAITTSProvider: TTSProvider {
     }
 
     public func synthesize(_ request: SynthesisRequest) async throws -> SynthesisOutput {
+        try Task.checkCancellation()
         try validate(modelId: request.modelId)
         try validate(format: request.format)
         guard !request.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -125,6 +138,9 @@ public actor OpenAITTSProvider: TTSProvider {
         var urlRequest = URLRequest(url: baseURL.appendingPathComponent("audio/speech"))
         urlRequest.timeoutInterval = requestTimeout
         urlRequest.httpMethod = "POST"
+        urlRequest.cachePolicy = .reloadIgnoringLocalCacheData
+        urlRequest.httpShouldHandleCookies = false
+        urlRequest.setValue("no-store", forHTTPHeaderField: "Cache-Control")
         urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
@@ -151,6 +167,10 @@ public actor OpenAITTSProvider: TTSProvider {
         do {
             (data, response) = try await performDataRequest(urlRequest, timeout: requestTimeout)
         } catch {
+            if Task.isCancelled || RemoteTTSSupport.isCancellation(error) {
+                log.info("OpenAI synthesis request cancelled requestId=\(request.requestId)")
+                throw CancellationError()
+            }
             let elapsedMs = Int(Date().timeIntervalSince(openAIStartedAt) * 1000)
             log.error("OpenAI synthesis request failed requestId=\(request.requestId) modelId=\(request.modelId) voiceId=\(resolvedVoice) elapsedMs=\(elapsedMs) error=\(error.localizedDescription)")
             throw error
@@ -166,10 +186,9 @@ public actor OpenAITTSProvider: TTSProvider {
 
         guard (200..<300).contains(httpResponse.statusCode) else {
             let elapsedMs = Int(Date().timeIntervalSince(openAIStartedAt) * 1000)
-            let message = String(data: data, encoding: .utf8) ?? "HTTP \(httpResponse.statusCode)"
             log.error("OpenAI synthesis request returned error requestId=\(request.requestId) status=\(httpResponse.statusCode) elapsedMs=\(elapsedMs) responseBytes=\(data.count)")
             throw NSError(domain: "VoxEngine", code: 5103, userInfo: [
-                NSLocalizedDescriptionKey: "OpenAI TTS request failed: \(message)"
+                NSLocalizedDescriptionKey: "OpenAI TTS request failed: HTTP \(httpResponse.statusCode)"
             ])
         }
         let synthesisMs = trace.end("\(data.count) bytes")
@@ -215,7 +234,13 @@ public actor OpenAITTSProvider: TTSProvider {
                 NSLocalizedDescriptionKey: "Missing OPENAI_API_KEY for OpenAI TTS provider."
             ])
         }
-        return resolvedKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = resolvedKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard key.utf8.count <= 4096, key.utf8.allSatisfy({ $0 >= 33 && $0 <= 126 }) else {
+            throw NSError(domain: "VoxEngine", code: 5110, userInfo: [
+                NSLocalizedDescriptionKey: "Invalid OpenAI TTS credential header value."
+            ])
+        }
+        return key
     }
 
     static func resolveRequestTimeout(

@@ -105,6 +105,9 @@ actor WarmupCoordinator {
             }
             record.lastError = nil
             records[modelId] = record
+        } else if var record = records[modelId], record.state == .ready {
+            record.state = .idle
+            records[modelId] = record
         }
 
         return snapshot(modelId: modelId, fallbackRequestedBy: requestedBy)

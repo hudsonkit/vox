@@ -30,6 +30,8 @@ private actor MockASRProvider: ASRProvider {
         self.modelId = modelId
     }
 
+    func evict() { isPreloaded = false }
+
     func models() async -> [ASRModelInfo] {
         [
             ASRModelInfo(
@@ -306,6 +308,16 @@ struct ASRRouteTests {
         #expect(ready.requestedBy == "voice-loop")
         #expect(ready.completedAt != nil)
         #expect(await provider.preloadCallCount() == 1)
+    }
+
+    @Test("Warmup status becomes idle after model eviction")
+    func warmupStatusAfterEviction() async throws {
+        let provider = MockASRProvider()
+        let service = VoxRuntimeService(engine: EngineManager(provider: provider), ttsEngine: TTSEngineManager(provider: EmptyTTSProvider()))
+        _ = try await service.performModelsPreload(params: ["modelId": "parakeet:v3"]) { _ in }
+        #expect(await service.performWarmupStatus(params: ["modelId": "parakeet:v3"]).state == "ready")
+        await provider.evict()
+        #expect(await service.performWarmupStatus(params: ["modelId": "parakeet:v3"]).state == "idle")
     }
 
     private func eventuallyWarmStatus(

@@ -94,3 +94,5 @@ vox perf dashboard --client vox-cli
 ```
 
 Continue with the [Quickstart](./quickstart.md), [Models and plugins](./models.md), [Swift Embed Guide](./apple-embed.md), or [Web Integration Guide](./web-integration.md) for the surface you chose.
+
+Native app-captured streaming uses `NativeStreamingASR.shared` in process or `transcribe.stream.*` through a shared authenticated host. Batch file transcription remains on Parakeet v3. See [Runtime](./runtime.md#native-pcm-streaming).

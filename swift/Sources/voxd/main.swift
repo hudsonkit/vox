@@ -25,6 +25,7 @@ func defaultASRConfig() -> ProvidersConfig {
     let appleSpeechModels = catalog.appleSpeechModelIDs()
     let openaiModels = catalog.openaiTranscribeModelIDs()
     return ProvidersConfig(providers: [
+        ProviderEntry(id: "native-streaming", kind: .asr, builtin: true),
         ProviderEntry(
             id: "parakeet",
             kind: .asr,
@@ -56,7 +57,8 @@ func defaultTTSConfig() -> ProvidersConfig {
                 id: "voxttsd",
                 kind: .tts,
                 command: command,
-                models: models
+                models: models,
+                supportsRequestCancellation: true
             )
         ])
     }
@@ -159,7 +161,9 @@ func loadEngines() -> (EngineManager, TTSEngineManager, String) {
         log.info("Loaded \(config.providers.count) provider(s) from providers.json")
         let asrConfig = (config.providers.contains(where: { $0.resolvedKind == .asr })
             ? config
-            : defaultASRConfig()).merging(asrPlugins)
+            : defaultASRConfig())
+            .merging([ProviderEntry(id: "native-streaming", kind: .asr, builtin: true)])
+            .merging(asrPlugins)
         let baseTTSConfig: ProvidersConfig
         if config.providers.contains(where: { $0.resolvedKind == .tts }) {
             let merged = TTSDefaultProviderConfig.mergingMissingDefaults(into: config)
@@ -191,7 +195,17 @@ func loadEngines() -> (EngineManager, TTSEngineManager, String) {
 
 let port = parsePort()
 let host = VoxDefaults.resolvedHost()
-let authToken = ProcessInfo.processInfo.environment["VOX_AUTH_TOKEN"].flatMap { $0.isEmpty ? nil : $0 }
+let privateConfiguration: PrivateRuntimeConfiguration?
+do {
+    privateConfiguration = try PrivateRuntimeConfiguration.resolve(
+        arguments: CommandLine.arguments, environment: ProcessInfo.processInfo.environment)
+} catch {
+    fputs("Failed to configure Vox daemon: \(error.localizedDescription)\n", stderr)
+    exit(1)
+}
+let authToken = privateConfiguration?.authToken
+    ?? ProcessInfo.processInfo.environment["VOX_AUTH_TOKEN"].flatMap { $0.isEmpty ? nil : $0 }
+let socketPath = privateConfiguration?.socketPath
 let (engine, ttsEngine, defaultSynthesisModelId) = loadEngines()
 let service = VoxRuntimeService(
     port: port,
@@ -199,7 +213,8 @@ let service = VoxRuntimeService(
     engine: engine,
     ttsEngine: ttsEngine,
     defaultSynthesisModelId: defaultSynthesisModelId,
-    authToken: authToken
+    authToken: authToken,
+    socketPath: socketPath
 )
 
 do {

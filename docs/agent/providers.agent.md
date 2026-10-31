@@ -13,7 +13,7 @@
 - NVIDIA Magpie: model `magpie-tts-multilingual`, `NV_API_KEY`/`NVIDIA_API_KEY`, LINEAR_PCM 44.1 kHz, dynamic `list_voices`, reject >2000 chars
 - Groq Orpheus: WAV `response_format`, 200-character limit, `GROQ_API_KEY`, require structurally valid WAV
 - Gemini TTS: Generate Content AUDIO for 2.5 and `gemini-3.1-flash-tts-preview`, wrap `audio/L16` as WAV, `GEMINI_API_KEY`/`GOOGLE_API_KEY`, voice `Rasalgethi`
-- per-request `credentials` allowlist: OpenAI, NVIDIA, Groq, Gemini/Google only; never ElevenLabs/MiniMax; never log keys
+- per-request `credentials` allowlist: OpenAI, ElevenLabs, NVIDIA, Groq, Gemini/Google; never MiniMax; never log keys
 - explicit empty/whitespace provider env key or alias fences process credential fallback for resolution and default model selection; process env is used only when that key is absent from `env`
 - NVIDIA Magpie, Groq, and Gemini synthesis HTTP errors redact the exact request text; JSON diagnostics keep secret redaction; plain-text bodies fail closed whenever synthesis sensitive values are supplied; voice discovery has no prompt; older providers keep their existing error surfaces
 - remote providers participate in defaults only when configured; aliases such as `magpie`/`groq-tts`/`google-tts` block canonical default overwrite
@@ -22,7 +22,7 @@
 - provider state may cache weights, but crash/restart must remain safe
 - canonical implementations: `swift/Sources/HudsonSpeechEngine/` built-in providers plus `ExternalProvider.swift` and `ExternalTTSProvider.swift`
 - published catalog: `https://voxd.cc/data/models.json` from repo `data/models.json`
-- catalog families the engine can run: `parakeet-tdt`, `apple-speech`, `mlx-audio`, `openai-transcribe`
+- catalog families the engine can run: `coreml-streaming`, `parakeet-tdt`, `apple-speech`, `mlx-audio`, `openai-transcribe`
 - catalog plugins: `plugins[]` plus model `plugin` id; install writes `~/.vox/plugins/<id>/provider.json`
 - Gemma 4 E2B: plugin `mlx-vlm`; `vox plugins install mlx-vlm`
 - Whistle: optional `whistle` plugin/model, prebuilt Needle runtime in a separate Rust process; file ASR <=30 seconds, word timings, no live partials
@@ -43,7 +43,19 @@
 - native alternative: `apple:speech-transcriber`
 - MLX shortlist: Qwen3-ASR 1.7B, Cohere Transcribe 03-2026, Nemotron 3.5 ASR Streaming 0.6B
 - supported architecture: Apple Silicon (`arm64`) only; no Intel support
-- current provider `transcribe` is file-based; do not claim model-backed partials from upstream streaming capability
+- ASRProvider.transcribe / external provider transcribe remain file-based. NativeStreamingASR.shared and transcribe.stream.* are a separate native PCM surface with model-backed partials.
 - model adapters use platform/provider audio conversion; never add hand-written resampling or denoising
 - remote OpenAI ASR: `gpt-transcribe`, `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, `whisper-1`
 - override catalog URL with `VOX_MODEL_CATALOG_URL`
+
+- ElevenLabs: scoped credentials.ELEVENLABS_API_KEY (elevenlabsApiKey / elevenlabs_api_key aliases) for synthesis and RPC voices with explicit modelId; request-local key wins, never mutates config/env/credential store or subsequent requests. OpenAI static voices also support scoped keys; other unsupported scoped voice providers error.
+- ElevenLabs uses an ephemeral no-cache/cookie/credential-storage session by default and no-store requests. HTTP errors return status only, no vendor body; non-WAV success bodies rejected. Default output_format=wav_44100, not invalid wav_44100_128; account tier gates apply, no automatic fallback. Inventories reflect configured keys, not borrowed keys. Browser HTTP voice-list route does not accept credentials in URLs.
+
+- Scoped voice credentials forwarding is verified for bundled voxttsd; third-party external adapters must honor that protocol themselves. Lend only the selected provider key, not a whole credential store.
+
+- Parakeet batch words are grouped SentencePiece/whitespace spans after chunk merge, punctuation attached, min/max token bounds and min piece confidence. 80 ms TDT estimates, not forced alignment/calibrated word posterior; no fake missing-vocab labels or truncated alignment arrays.
+
+- External TTS cancellation opt-in: ProviderEntry.supportsRequestCancellation=true; stock voxd sets it for matching bundled voxttsd. Absent/false preserves legacy wire behavior, local cancellation only.
+- Internal notification: {jsonrpc:"2.0",method:"$/cancelRequest",params:{id:<numeric transport call ID>}}, no outer ID/ack. Not request UUID/model/client ID. Unknown IDs ignored, cancelled helper calls may reply -32800 request_cancelled; late host replies ignored. No process kill/restart.
+- Helper: dedicated bounded POSIX stdin reader (1 MiB frames), actor registry <=16 accepted tasks, concurrent HTTP/control processing, serialized output. Parent EOF cancels/drains. Host serializes writes and removes continuations once on cancellation/timeout. Extension not wired to external ASR.
+- OpenAI TTS HTTP errors now status-only, never vendor body; ephemeral default session, no-store. Existing logs untouched. scripts/test-private-tts.py verifies private same-user transport, scoped errors/keys and cancellation while another client's request succeeds on unchanged helper PID, no paid calls.

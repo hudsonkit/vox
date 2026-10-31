@@ -50,14 +50,15 @@ interface VoxClientSurface {
   listModels(): Promise<unknown>;
   listCatalog(): Promise<SpeechModelCatalog>;
   refreshCatalog(): Promise<SpeechModelCatalog>;
-  listVoices(modelId?: string): Promise<unknown>;
+  listVoices(modelId?: string, credentials?: SynthesisOptions["credentials"]): Promise<unknown>;
   installModel(modelId?: string): Promise<unknown>;
   preloadModel(modelId?: string): Promise<unknown>;
   getWarmupStatus(modelId?: string): Promise<unknown>;
   startWarmup(modelId?: string): Promise<unknown>;
   scheduleWarmup(modelId?: string, delayMs?: number): Promise<unknown>;
   transcribeFile(path: string, modelId?: string): Promise<FileTranscriptionResult>;
-  annotateFile(path: string, options?: AnnotationOptions): Promise<FileAnnotationResult>;
+  listAnnotationModels(): Promise<AnnotationModelInfo[]>;
+  annotateFile(path: string, options: AnnotationOptions): Promise<FileAnnotationResult>;
   synthesize(text: string, options?: SynthesisOptions): Promise<SynthesisResult>;
   getLiveSessionStatus(): Promise<LiveSessionStatus | null>;
   cancelLiveSession(sessionId?: string): Promise<{ cancelled: boolean; sessionId: string }>;
@@ -92,6 +93,17 @@ interface SynthesisResult {
   speechTiming?: SpeechTiming;
 }
 ```
+
+## Scoped TTS credentials
+
+Synthesis accepts request-local OpenAI, ElevenLabs, NVIDIA, Groq and Gemini keys
+in `SynthesisOptions.credentials`. For example, send `ELEVENLABS_API_KEY` with an
+explicit ElevenLabs `modelId` and selected `voiceId`. The key is not installed in
+the daemon or reused for another request. Do not log options that contain keys.
+`listVoices(modelId, credentials)` supports selected-account ElevenLabs discovery
+and OpenAI's static catalog. An explicit model is required for scoped discovery;
+built-in providers that do not support it return an error rather than ignoring the key.
+See [provider credential rules](./providers.md).
 
 ## Error handling
 
@@ -141,3 +153,11 @@ On the daemon side, set `VOX_PORT` or `VOX_HOST` environment variables to overri
 - call `listVoices(modelId)` before pinning a TTS voice in product code
 - benchmark with representative audio clips and read `inferenceMs` separately from `totalMs`
 - preserve raw transcription and synthesis metrics in your own telemetry if the app already exports traces
+
+## App-captured PCM streaming
+
+Call `preloadModel(modelId)` explicitly, then `startPCMStream(modelId)`. Feed mono 16 kHz `Float32Array` packets with `appendPCMStream(sessionId, sequence, samples)`. Each packet contains 1–16000 finite samples. Await the acknowledgement and use its `nextSequence` before sending another packet. Read cumulative text, approximate word timings, and endpoint notifications from `updates`.
+
+Call `finishPCMStream(sessionId)` to flush and return the final transcript. Call `cancelPCMStream(sessionId)` to discard pending audio and text. `nativeStreamingStatus()` exposes residency, ownership, and the encoder's planned ANE/CPU placement. An endpoint notification does not implicitly finish a session. Disconnect cancels ownership; reconnect requires a new session. See the [wire contract](./runtime.md#pcm-wire-contract).
+
+Cloud annotation requires an explicit model and request-scoped vendor credential. See [file annotation](./runtime.md#file-annotation) for options, nullable evidence, upload limits and cancellation. `AnnotationOptions.timeoutMs` defaults to 3,600,000 ms.

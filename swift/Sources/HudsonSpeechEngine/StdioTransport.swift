@@ -8,6 +8,15 @@ public final class StdioTransport: @unchecked Sendable {
     private let env: [String: String]?
     private let queue = DispatchQueue(label: "cc.voxd.stdio-transport")
 
+    private let writer = DispatchQueue(label: "cc.voxd.stdio-writer")
+    private let supportsRequestCancellation: Bool
+    private final class CancellationFlag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var cancelled = false
+        func cancel() { lock.withLock { cancelled = true } }
+        var isCancelled: Bool { lock.withLock { cancelled } }
+    }
+
     private var process: Process?
     private var stdinPipe: Pipe?
     private var stdoutPipe: Pipe?
@@ -15,7 +24,6 @@ public final class StdioTransport: @unchecked Sendable {
     private var nextId: Int = 1
     private var pending: [Int: CheckedContinuation<[String: Any], any Error>] = [:]
     private var _progressHandler: (([String: Any]) -> Void)?
-    private var readTask: Task<Void, Never>?
     private var _isRunning: Bool = false
     private var _stderrOutput: String = ""
     private let callTimeoutSeconds: TimeInterval
@@ -23,8 +31,10 @@ public final class StdioTransport: @unchecked Sendable {
     public init(
         command: [String],
         env: [String: String]? = nil,
-        callTimeoutSeconds: TimeInterval? = nil
+        callTimeoutSeconds: TimeInterval? = nil,
+        supportsRequestCancellation: Bool = false
     ) {
+        self.supportsRequestCancellation = supportsRequestCancellation
         self.command = command
         self.env = env
         self.callTimeoutSeconds = callTimeoutSeconds ?? Self.resolveCallTimeoutSeconds(env: env)
@@ -76,8 +86,6 @@ public final class StdioTransport: @unchecked Sendable {
     }
 
     public func stop() {
-        readTask?.cancel()
-        readTask = nil
         queue.sync {
             if let process, process.isRunning {
                 try? stdinPipe?.fileHandleForWriting.close()
@@ -97,6 +105,7 @@ public final class StdioTransport: @unchecked Sendable {
     }
 
     public func call(method: String, params: [String: Any] = [:]) async throws -> [String: Any] {
+        try Task.checkCancellation()
         let isRunning = queue.sync { _isRunning }
         guard isRunning else {
             throw StdioTransportError.notRunning
@@ -116,6 +125,9 @@ public final class StdioTransport: @unchecked Sendable {
         ]
 
         let data = try JSONSerialization.data(withJSONObject: request)
+        if supportsRequestCancellation && data.count > 1024 * 1024 {
+            throw StdioTransportError.requestTooLarge
+        }
         guard var line = String(data: data, encoding: .utf8) else {
             throw StdioTransportError.serializationFailed
         }
@@ -125,25 +137,50 @@ public final class StdioTransport: @unchecked Sendable {
             throw StdioTransportError.serializationFailed
         }
 
-        let pipe = queue.sync { stdinPipe }
-        guard let pipe else {
-            throw StdioTransportError.notRunning
-        }
-
-        return try await withCheckedThrowingContinuation { continuation in
-            queue.sync {
-                pending[id] = continuation
+        let cancellation = CancellationFlag()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                queue.async { [self] in
+                    guard !cancellation.isCancelled else {
+                        continuation.resume(throwing: CancellationError()); return
+                    }
+                    guard self._isRunning, let pipe = self.stdinPipe else {
+                        continuation.resume(throwing: StdioTransportError.notRunning); return
+                    }
+                    self.pending[id] = continuation
+                    // Never block the state queue or cooperative executor on a pipe.
+                    // The single writer preserves request-before-cancel line ordering.
+                    self.writer.async { [weak self] in
+                        guard let self, self.queue.sync(execute: { self.pending[id] != nil && self._isRunning }) else { return }
+                        do { try pipe.fileHandleForWriting.write(contentsOf: lineData) }
+                        catch {
+                            self.queue.async {
+                                self.pending.removeValue(forKey: id)?.resume(throwing: StdioTransportError.notRunning)
+                            }
+                        }
+                    }
+                    self.queue.asyncAfter(deadline: .now() + self.callTimeoutSeconds) { [weak self] in
+                        self?.cancelPending(id: id, method: method, error: StdioTransportError.timeout(method: method))
+                    }
+                }
             }
-
-            pipe.fileHandleForWriting.write(lineData)
-
-            // Schedule timeout
-            queue.asyncAfter(deadline: .now() + self.callTimeoutSeconds) { [weak self] in
-                guard let self else { return }
-                let cont = self.pending.removeValue(forKey: id)
-                cont?.resume(throwing: StdioTransportError.timeout(method: method))
-            }
+        } onCancel: {
+            cancellation.cancel()
+            self.queue.async { self.cancelPending(id: id, method: method, error: CancellationError()) }
         }
+    }
+
+    /// Runs only on the state queue. Unknown/late replies are deliberately ignored.
+    private func cancelPending(id: Int, method: String, error: any Error) {
+        guard let continuation = pending.removeValue(forKey: id) else { return }
+        continuation.resume(throwing: error)
+        log.info("Provider call cancelled id=\(id) method=\(method) remoteCancellation=\(supportsRequestCancellation)")
+        guard supportsRequestCancellation, _isRunning, let pipe = stdinPipe,
+              let data = try? JSONSerialization.data(withJSONObject: [
+                "jsonrpc": "2.0", "method": "$/cancelRequest", "params": ["id": id]
+              ]) else { return }
+        let line = data + Data([0x0A])
+        writer.async { try? pipe.fileHandleForWriting.write(contentsOf: line) }
     }
 
     deinit {
@@ -185,37 +222,42 @@ public final class StdioTransport: @unchecked Sendable {
 
     private func startReadingStdout(_ pipe: Pipe) {
         let handle = pipe.fileHandleForReading
-        readTask = Task.detached { [weak self] in
+        // FileHandle.availableData blocks. Neither Swift's cooperative executor
+        // nor GCD's bounded global pool may be occupied by a persistent pipe read.
+        Thread.detachNewThread { [weak self] in
+            Thread.current.name = "Vox provider stdout"
             var buffer = Data()
-            while !Task.isCancelled {
-                let chunk = handle.availableData
-                if chunk.isEmpty { break }
-                buffer.append(chunk)
-
-                while let newlineRange = buffer.range(of: Data([0x0A])) {
-                    let lineData = buffer.subdata(in: buffer.startIndex..<newlineRange.lowerBound)
-                    buffer.removeSubrange(buffer.startIndex...newlineRange.lowerBound)
-
-                    guard !lineData.isEmpty,
-                          let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any] else {
-                        continue
+            while self?.processIsRunning == true {
+                let hasData = autoreleasepool {
+                    let chunk = handle.availableData
+                    guard !chunk.isEmpty else { return false }
+                    buffer.append(chunk)
+                    while let newlineRange = buffer.range(of: Data([0x0A])) {
+                        let lineData = buffer.subdata(in: buffer.startIndex..<newlineRange.lowerBound)
+                        buffer.removeSubrange(buffer.startIndex...newlineRange.lowerBound)
+                        guard !lineData.isEmpty,
+                              let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any] else { continue }
+                        self?.handleMessage(json)
                     }
-
-                    self?.handleMessage(json)
+                    return true
                 }
+                if !hasData { break }
             }
         }
     }
 
     private func startReadingStderr(_ pipe: Pipe) {
         let handle = pipe.fileHandleForReading
-        Task.detached { [weak self] in
-            while !Task.isCancelled {
-                let chunk = handle.availableData
-                if chunk.isEmpty { break }
-                if let text = String(data: chunk, encoding: .utf8) {
-                    self?.appendStderr(text)
+        Thread.detachNewThread { [weak self] in
+            Thread.current.name = "Vox provider stderr"
+            while self?.processIsRunning == true {
+                let hasData = autoreleasepool {
+                    let chunk = handle.availableData
+                    guard !chunk.isEmpty else { return false }
+                    if let text = String(data: chunk, encoding: .utf8) { self?.appendStderr(text) }
+                    return true
                 }
+                if !hasData { break }
             }
         }
     }
@@ -281,6 +323,7 @@ public enum StdioTransportError: Error, LocalizedError {
     case notRunning
     case stopped
     case serializationFailed
+    case requestTooLarge
     case timeout(method: String)
     case rpcError(String)
     case processExited(exitCode: Int32, stderr: String)
@@ -293,6 +336,8 @@ public enum StdioTransportError: Error, LocalizedError {
             return "Provider process is not running"
         case .stopped:
             return "Provider transport was stopped"
+        case .requestTooLarge:
+            return "Provider request exceeds the supported 1 MiB frame limit"
         case .serializationFailed:
             return "Failed to serialize JSON-RPC request"
         case .timeout(let method):

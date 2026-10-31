@@ -3,6 +3,88 @@ import Testing
 @testable import HudsonSpeechEngine
 
 struct StdioTransportTests {
+    @Test("cancelling a pending call returns CancellationError without stopping other calls")
+    func cancellingPendingCall() async throws {
+        let temp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temp) }
+        let script = temp.appendingPathComponent("cancel-provider.js")
+        try """
+        require('readline').createInterface({input:process.stdin}).on('line', line => {
+          const r = JSON.parse(line);
+          if (r.id === undefined) return;
+          setTimeout(() => process.stdout.write(JSON.stringify({id:r.id,result:{ok:true}})+'\\n'), r.method === 'slow' ? 500 : 0);
+        });
+        """.write(to: script, atomically: true, encoding: .utf8)
+        let transport = StdioTransport(command: ["/usr/bin/env", "bun", script.path])
+        try transport.start(); defer { transport.stop() }
+        let task = Task { () -> Bool in
+            do { _ = try await transport.call(method: "slow"); return false }
+            catch { return error is CancellationError }
+        }
+        try await Task.sleep(for: .milliseconds(100)); task.cancel()
+        #expect(await task.value)
+        let other = try await transport.call(method: "ping")
+        #expect(other["ok"] as? Bool == true && transport.processIsRunning)
+    }
+
+    @Test("opt-in cancellation and timeout send only the matching JSON-RPC notification")
+    func requestScopedProtocolCancellation() async throws {
+        let temp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temp) }
+        let script = temp.appendingPathComponent("scoped-cancel.js")
+        try """
+        const cancelled = [];
+        require('readline').createInterface({input:process.stdin}).on('line', line => {
+          const r = JSON.parse(line);
+          if (r.method === '$/cancelRequest') {
+            cancelled.push(r.params.id);
+            // An intentionally late response must not resume a cancelled continuation twice.
+            process.stdout.write(JSON.stringify({id:r.params.id,result:{late:true}})+'\\n');
+            return;
+          }
+          if (r.method === 'slow') return;
+          process.stdout.write(JSON.stringify({id:r.id,result:{cancelled}})+'\\n');
+        });
+        """.write(to: script, atomically: true, encoding: .utf8)
+        let transport = StdioTransport(command: ["/usr/bin/env", "bun", script.path],
+            callTimeoutSeconds: 0.4, supportsRequestCancellation: true)
+        try transport.start(); defer { transport.stop() }
+        let task = Task { () -> Bool in
+            do { _ = try await transport.call(method: "slow"); return false }
+            catch { return error is CancellationError }
+        }
+        try await Task.sleep(for: .milliseconds(100)); task.cancel()
+        #expect(await task.value)
+        do {
+            _ = try await transport.call(method: "oversized", params: ["input": String(repeating: "x", count: 1024 * 1024)])
+            Issue.record("Expected rejection before writing a frame that could disrupt other clients")
+        } catch let error as StdioTransportError {
+            if case .requestTooLarge = error {} else { Issue.record("Expected requestTooLarge") }
+        }
+        let state = try await transport.call(method: "state")
+        #expect(state["cancelled"] as? [Int] == [1])
+        do { _ = try await transport.call(method: "slow"); Issue.record("Expected timeout") }
+        catch let error as StdioTransportError {
+            if case .timeout = error {} else { Issue.record("Expected timeout") }
+        }
+        let afterTimeout = try await transport.call(method: "state")
+        #expect(afterTimeout["cancelled"] as? [Int] == [1, 4])
+        #expect(transport.processIsRunning)
+    }
+
+    @Test("an already cancelled call is never submitted to the provider")
+    func alreadyCancelledCall() async throws {
+        let transport = StdioTransport(command: ["/usr/bin/false"])
+        let task = Task { () -> Bool in
+            withUnsafeCurrentTask { $0?.cancel() }
+            do { _ = try await transport.call(method: "never"); return false }
+            catch { return error is CancellationError }
+        }
+        #expect(await task.value)
+    }
+
     @Test("fast provider responses are matched to pending calls")
     func fastProviderResponseDoesNotRacePendingRegistration() async throws {
         let tempDirectory = FileManager.default.temporaryDirectory

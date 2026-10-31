@@ -1,0 +1,50 @@
+name: CI
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  swift:
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: xcrun swift --version
+      - name: Root package exports the lightweight Swift client
+        run: xcrun swift build --target VoxClient --jobs 3
+      - name: Public native Parakeet consumer compiles for iOS Simulator
+        run: |
+          xcrun swift build --package-path examples/parakeet-lifecycle \
+            --triple arm64-apple-ios17.0-simulator \
+            --sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)" \
+            --scratch-path "$RUNNER_TEMP/vox-parakeet-ios" --jobs 3
+      - run: xcrun swift test --package-path swift --jobs 3
+      - name: Private speech routes use loopback fixtures, never paid vendors
+        run: |
+          xcrun swift build --package-path swift --product voxd --jobs 3
+          python3 scripts/test-private-annotation.py
+          xcrun swift build --package-path swift --product voxttsd --jobs 3
+          python3 scripts/test-private-tts.py
+      - name: Provider readers do not starve a strict cooperative executor
+        env:
+          LIBDISPATCH_COOPERATIVE_POOL_STRICT: '1'
+        run: xcrun swift test --package-path swift --skip-build --filter StdioTransportTests
+  clients-and-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.15
+      - run: bun install --frozen-lockfile
+      - run: bun run --cwd packages/client build
+      - run: bun test packages/client/test packages/cli/test packages/web-client/test
+      - run: bun run docs:check

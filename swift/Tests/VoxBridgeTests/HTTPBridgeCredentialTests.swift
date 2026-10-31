@@ -3,7 +3,7 @@ import Testing
 @testable import VoxBridge
 
 struct HTTPBridgeCredentialTests {
-    @Test("HTTP bridge allowlists NVIDIA, Groq, and Gemini credentials and drops unsupported keys")
+    @Test("HTTP bridge allowlists ElevenLabs, NVIDIA, Groq, and Gemini credentials and drops unsupported keys")
     func bridgeForwardsAllowlistedTTSCredentials() throws {
         let credentials = HTTPBridgeServer.providerCredentials(from: [
             "credentials": [
@@ -13,7 +13,7 @@ struct HTTPBridgeCredentialTests {
                 "groq_api_key": "groq-snake",
                 "GEMINI_API_KEY": "gemini-key",
                 "GOOGLE_API_KEY": "google-key",
-                "ELEVENLABS_API_KEY": "unsupported",
+                "ELEVENLABS_API_KEY": " eleven-lent ",
                 "secret": "nope"
             ]
         ])
@@ -25,7 +25,7 @@ struct HTTPBridgeCredentialTests {
         #expect(parsed["groq_api_key"] == "groq-snake")
         #expect(parsed["GEMINI_API_KEY"] == "gemini-key")
         #expect(parsed["GOOGLE_API_KEY"] == "google-key")
-        #expect(parsed["ELEVENLABS_API_KEY"] == nil)
+        #expect(parsed["ELEVENLABS_API_KEY"] == "eleven-lent")
         #expect(parsed["secret"] == nil)
     }
 

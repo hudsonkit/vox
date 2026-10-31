@@ -6,6 +6,9 @@ public final class VoxRuntimeService: @unchecked Sendable {
     private let log = VoxLog.service
     private let port: UInt16
     private let socketPath: String?
+    private let authToken: String?
+    private let privateCapabilityURL: URL?
+    private var privateRegistration: PrivateRuntimeRegistration?
     private let bridge: ServiceBridge
     private let asrEngine: EngineManager
     private let annotationEngine: AnnotationManager
@@ -15,12 +18,13 @@ public final class VoxRuntimeService: @unchecked Sendable {
     private let history: SpeechHistoryRecorder
     private let recorder = MicrophoneFileRecorder()
     private let sessions = LiveSessionCoordinator()
+    private let streamingSessions = StreamingSessionCoordinator()
     private let synthesisSessions = SynthesisSessionCoordinator()
     private let startedAt = Date()
     private let preferencesLoader: @Sendable () -> VoxPreferences
     private let defaultSynthesisModelId: String
-    private let inFlightSynthesisLock = NSLock()
-    private var inFlightSynthesisGenerates: [String: [String: Task<Void, Never>]] = [:]
+    private let annotationTasks = ConnectionRequestTasks()
+    private let synthesisTasks = ConnectionRequestTasks()
 
     public init(
         port: UInt16 = VoxDefaults.daemonPort,
@@ -32,12 +36,15 @@ public final class VoxRuntimeService: @unchecked Sendable {
         defaultSynthesisModelId: String = TTSDefaults.modelId,
         authToken: String? = nil,
         socketPath: String? = nil,
+        privateCapabilityURL: URL? = nil,
         preferencesLoader: @escaping @Sendable () -> VoxPreferences = {
             (try? VoxPreferences.load()) ?? VoxPreferences()
         }
     ) {
         self.port = socketPath == nil ? port : 0
         self.socketPath = socketPath
+        self.authToken = authToken
+        self.privateCapabilityURL = privateCapabilityURL
         self.bridge = ServiceBridge(port: port, serviceName: "Vox", bindAddress: bindAddress, authToken: authToken, socketPath: socketPath)
         self.asrEngine = engine
         self.annotationEngine = annotationEngine
@@ -59,7 +66,16 @@ public final class VoxRuntimeService: @unchecked Sendable {
             startedAt: startedAt,
             socketPath: socketPath
         )
-        try RuntimeRegistry.write(runtime)
+        do {
+            if socketPath != nil {
+                guard let authToken else { throw POSIXError(.EACCES) }
+                privateRegistration = try PrivateRuntimeRegistration(runtime: runtime, authToken: authToken,
+                    url: privateCapabilityURL ?? RuntimePaths.runtimeFileURL())
+            } else { try RuntimeRegistry.write(runtime) }
+        } catch {
+            bridge.stop()
+            throw error
+        }
 
         let speechPreferences = preferencesLoader().speech
         if speechPreferences.modelDownloadPolicy.warmsAtServiceStart {
@@ -71,8 +87,12 @@ public final class VoxRuntimeService: @unchecked Sendable {
     }
 
     public func stop() {
+        annotationTasks.cancelAll()
+        synthesisTasks.cancelAll()
         bridge.stop()
-        try? RuntimeRegistry.remove()
+        Task { await streamingSessions.shutdown() }
+        if socketPath != nil { privateRegistration?.invalidate(); privateRegistration = nil }
+        else { try? RuntimeRegistry.remove() }
     }
 
     func performSynthesizeGenerate(params: [String: Any]?) async throws -> SynthesisOutput {
@@ -106,7 +126,8 @@ public final class VoxRuntimeService: @unchecked Sendable {
     }
 
     func performSynthesizeVoices(params: [String: Any]?) async throws -> [TTSVoiceInfo] {
-        try await performSynthesizeVoices(modelId: params?["modelId"] as? String)
+        try await performSynthesizeVoices(modelId: params?["modelId"] as? String,
+            providerCredentials: providerCredentials(from: params))
     }
 
     func performSynthesizeModels() async -> [TTSModelInfo] {
@@ -216,7 +237,12 @@ public final class VoxRuntimeService: @unchecked Sendable {
             modelId: modelId,
             clientId: clientId,
             text: text,
-            words: words
+            words: words,
+            providerCredentials: AnnotationLentCredentials.parse(from: params),
+            diarize: params?["diarize"] as? Bool ?? true,
+            tagAudioEvents: params?["tagAudioEvents"] as? Bool,
+            languageCode: params?["languageCode"] as? String,
+            numSpeakers: params?["numSpeakers"] as? Int
         )
     }
 
@@ -225,17 +251,20 @@ public final class VoxRuntimeService: @unchecked Sendable {
         modelId: String,
         clientId: String,
         text: String?,
-        words: [WordTiming]?
+        words: [WordTiming]?,
+        providerCredentials: [String: String] = [:], diarize: Bool = true,
+        tagAudioEvents: Bool? = nil, languageCode: String? = nil, numSpeakers: Int? = nil
     ) async throws -> AnnotationRouteResult {
         let transcription: AnnotationInputTranscription? = {
-            guard let text else { return nil }
-            return AnnotationInputTranscription(text: text, words: words ?? [])
+            guard text != nil || words != nil else { return nil }
+            return AnnotationInputTranscription(text: text ?? "", words: words ?? [])
         }()
 
         let request = AnnotationRequest(
             url: URL(fileURLWithPath: path),
             modelId: modelId,
-            transcription: transcription
+            transcription: transcription, providerCredentials: providerCredentials,
+            diarize: diarize, tagAudioEvents: tagAudioEvents, languageCode: languageCode, numSpeakers: numSpeakers
         )
         let output = try await annotationEngine.annotate(request: request)
         let sample = PerformanceSample(
@@ -304,8 +333,9 @@ public final class VoxRuntimeService: @unchecked Sendable {
         )
     }
 
-    private func performSynthesizeVoices(modelId: String?) async throws -> [TTSVoiceInfo] {
-        try await ttsEngine.voices(modelId: modelId)
+    private func performSynthesizeVoices(modelId: String?, providerCredentials: [String: String] = [:]) async throws -> [TTSVoiceInfo] {
+        guard providerCredentials.isEmpty || modelId != nil else { throw TTSVoiceCredentialsError.modelRequired }
+        return try await ttsEngine.voices(modelId: modelId, providerCredentials: providerCredentials)
     }
 
     private func currentPreferences() -> VoxPreferences {
@@ -694,6 +724,7 @@ public final class VoxRuntimeService: @unchecked Sendable {
 
     private func registerHandlers() {
         bridge.onClientDisconnected = { [weak self] connectionID in
+            Task { await self?.streamingSessions.disconnect(connectionID: connectionID) }
             guard let self else { return }
             Task {
                 await self.handleDisconnect(connectionID: connectionID)
@@ -949,56 +980,66 @@ public final class VoxRuntimeService: @unchecked Sendable {
             }
         }
 
+        bridge.handle("annotation.models") { [weak self] _, reply in
+            guard let self else { return }
+            Task { reply(["models": await self.annotationEngine.models().map { $0.dictionaryValue() }], nil) }
+        }
+
         bridge.handle("annotate.file") { [weak self] params, reply in
             guard let self else { return }
             let path = params?["path"] as? String
             let modelId = (params?["modelId"] as? String) ?? "speaker-diarization:v1"
             let clientId = (params?["clientId"] as? String) ?? "unknown"
+            let connectionID = (params?["_connectionID"] as? String) ?? "unknown"
             let text = params?["text"] as? String
             let words = self.parseAnnotationWords(params?["words"] as? [[String: Any]])
-            Task {
+            let credentials = AnnotationLentCredentials.parse(from: params)
+            let diarize = params?["diarize"] as? Bool ?? true
+            let events = params?["tagAudioEvents"] as? Bool
+            let language = params?["languageCode"] as? String
+            let speakers = params?["numSpeakers"] as? Int
+            let (id, ticket) = self.annotationTasks.reserve(connectionID: connectionID)
+            let task = Task {
+                defer { self.annotationTasks.finish(connectionID: connectionID, id: id, ticket: ticket) }
                 do {
-                    guard let path else {
-                        throw NSError(domain: "VoxService", code: 1, userInfo: [
-                            NSLocalizedDescriptionKey: "Missing path"
-                        ])
-                    }
-                    let result = try await self.performAnnotateFile(
-                        path: path,
-                        modelId: modelId,
-                        clientId: clientId,
-                        text: text,
-                        words: words
-                    )
+                    try Task.checkCancellation()
+                    guard let path else { throw RemoteAnnotationError.invalidFile }
+                    let result = try await self.performAnnotateFile(path: path, modelId: modelId,
+                        clientId: clientId, text: text, words: words, providerCredentials: credentials,
+                        diarize: diarize, tagAudioEvents: events, languageCode: language, numSpeakers: speakers)
+                    try Task.checkCancellation()
                     await self.performance.record(result.performanceSample)
                     reply(result.output.dictionaryValue(), nil)
                 } catch {
-                    await self.performance.record(PerformanceSample(
-                        clientId: clientId,
-                        route: "annotate.file",
-                        modelId: modelId,
-                        outcome: "error",
-                        textLength: 0,
-                        error: error.localizedDescription
-                    ))
-                    reply(nil, error.localizedDescription)
+                    let cancelled = error is CancellationError || Task.isCancelled
+                    let message = cancelled ? "annotation_cancelled:connection_closed" : error.localizedDescription
+                    await self.performance.record(PerformanceSample(clientId: clientId, route: "annotate.file",
+                        modelId: modelId, outcome: cancelled ? "cancelled" : "error", textLength: 0, error: message))
+                    reply(nil, message)
                 }
             }
+            ticket.attach(task)
         }
 
         bridge.handle("synthesize.voices") { [weak self] params, reply in
             guard let self else { return }
             let modelId = params?["modelId"] as? String
-            Task {
+            let credentials = self.providerCredentials(from: params)
+            let connectionID = params?["_connectionID"] as? String ?? "unknown"
+            let (id, ticket) = self.synthesisTasks.reserve(connectionID: connectionID)
+            let task = Task {
+                defer { self.synthesisTasks.finish(connectionID: connectionID, id: id, ticket: ticket) }
                 do {
-                    let voices = try await self.performSynthesizeVoices(modelId: modelId)
-                    reply([
-                        "voices": voices.map { $0.dictionaryValue() }
-                    ], nil)
+                    try Task.checkCancellation()
+                    let voices = try await self.performSynthesizeVoices(modelId: modelId, providerCredentials: credentials)
+                    try Task.checkCancellation()
+                    reply(["voices": voices.map { $0.dictionaryValue() }], nil)
                 } catch {
-                    reply(nil, error.localizedDescription)
+                    reply(nil, Task.isCancelled || error is CancellationError
+                          ? "request_cancelled:connection_closed" : error.localizedDescription)
                 }
             }
+            ticket.attach(task)
         }
 
         bridge.handle("synthesize.models") { [weak self] _, reply in
@@ -1039,15 +1080,16 @@ public final class VoxRuntimeService: @unchecked Sendable {
                 providerCredentials: providerCredentials
             )
 
-            let taskID = UUID().uuidString
+            let (taskID, ticket) = self.synthesisTasks.reserve(connectionID: connectionID)
             let task = Task { [weak self] in
                 guard let self else { return }
                 defer {
-                    self.finishInFlightSynthesisGenerate(connectionID: connectionID, taskID: taskID)
+                    self.synthesisTasks.finish(connectionID: connectionID, id: taskID, ticket: ticket)
                 }
                 let routeStartedAt = Date()
                 self.log.info("synthesize.generate started requestId=\(request.requestId) connectionId=\(connectionID) clientId=\(clientId) modelId=\(modelId) voiceId=\(voiceId ?? "default") textLength=\(text.count)")
                 do {
+                    try Task.checkCancellation()
                     let output = try await self.performSynthesizeGenerate(
                         request: request,
                         speechTimingRequest: speechTimingRequest
@@ -1092,7 +1134,60 @@ public final class VoxRuntimeService: @unchecked Sendable {
                     reply(nil, error.localizedDescription)
                 }
             }
-            self.registerInFlightSynthesisGenerate(task, connectionID: connectionID, taskID: taskID)
+            ticket.attach(task)
+        }
+
+        bridge.handle("transcribe.stream.status") { _, reply in
+            Task {
+                do { reply(try Self.codableDictionary(await NativeStreamingASR.shared.status()), nil) }
+                catch { reply(nil, error.localizedDescription) }
+            }
+        }
+        bridge.handle("transcribe.stream.start") { [weak self] params, reply in
+            guard let self else { return }
+            let parameters = StreamParameters(params)
+            Task {
+                do {
+                    guard let connectionID = parameters.connectionID, let clientId = parameters.clientId, !clientId.isEmpty else { throw StreamingASRError.invalidSession }
+                    let modelId = parameters.modelId ?? StreamingASRDefaults.modelId
+                    let id = try await self.streamingSessions.start(connectionID: connectionID, clientId: clientId, modelId: modelId)
+                    reply(["sessionId": id.uuidString, "modelId": modelId, "sampleRate": 16000, "channels": 1, "encoding": "float32le", "maxPacketSamples": 16000, "nextSequence": 0], nil)
+                } catch { reply(nil, error.localizedDescription) }
+            }
+        }
+        bridge.handle("transcribe.stream.append") { [weak self] params, reply in
+            guard let self else { return }
+            let parameters = StreamParameters(params)
+            Task {
+                do {
+                    let (id, connectionID, clientId) = try Self.streamIdentity(parameters)
+                    guard let sequence = parameters.sequence, let audio = parameters.audioBase64 else { throw StreamingASRError.invalidAudio }
+                    let updates = try await self.streamingSessions.append(id: id, connectionID: connectionID, clientId: clientId, sequence: sequence, samples: StreamingPCM.decode(audio))
+                    reply(["sessionId": id.uuidString, "nextSequence": sequence + 1, "updates": try updates.map(Self.codableDictionary)], nil)
+                } catch { reply(nil, error.localizedDescription) }
+            }
+        }
+        bridge.handle("transcribe.stream.finish") { [weak self] params, reply in
+            guard let self else { return }
+            let parameters = StreamParameters(params)
+            Task {
+                do {
+                    let (id, connectionID, clientId) = try Self.streamIdentity(parameters)
+                    let result = try await self.streamingSessions.finish(id: id, connectionID: connectionID, clientId: clientId)
+                    reply(["sessionId": id.uuidString, "result": try Self.codableDictionary(result)], nil)
+                } catch { reply(nil, error.localizedDescription) }
+            }
+        }
+        bridge.handle("transcribe.stream.cancel") { [weak self] params, reply in
+            guard let self else { return }
+            let parameters = StreamParameters(params)
+            Task {
+                do {
+                    let (id, connectionID, clientId) = try Self.streamIdentity(parameters)
+                    try await self.streamingSessions.cancel(id: id, connectionID: connectionID, clientId: clientId)
+                    reply(["sessionId": id.uuidString, "cancelled": true], nil)
+                } catch { reply(nil, error.localizedDescription) }
+            }
         }
 
         bridge.handle("transcribe.sessionStatus") { [weak self] _, reply in
@@ -1487,6 +1582,16 @@ public final class VoxRuntimeService: @unchecked Sendable {
         }
     }
 
+    private static func streamIdentity(_ params: StreamParameters) throws -> (UUID, String, String) {
+        guard let raw = params.sessionId, let id = UUID(uuidString: raw),
+              let connectionID = params.connectionID,
+              let clientId = params.clientId, !clientId.isEmpty else { throw StreamingASRError.invalidSession }
+        return (id, connectionID, clientId)
+    }
+    private static func codableDictionary<T: Encodable>(_ value: T) throws -> [String: Any] {
+        try JSONSerialization.jsonObject(with: JSONEncoder().encode(value)) as? [String: Any] ?? [:]
+    }
+
     private func ensureMicrophoneAccessForLiveSession() async throws {
         let status = await MicrophonePermission.requestAccessStatusString()
         switch status {
@@ -1508,7 +1613,10 @@ public final class VoxRuntimeService: @unchecked Sendable {
     }
 
     private func makeDoctorReport() async -> DoctorReport {
-        let runtimeExists = ((try? RuntimeRegistry.read()) != nil)
+        let runtimeExists: Bool
+        if socketPath != nil {
+            runtimeExists = (try? PrivateRuntimeCapability.read(from: privateCapabilityURL ?? RuntimePaths.runtimeFileURL())) != nil
+        } else { runtimeExists = ((try? RuntimeRegistry.read()) != nil) }
         let asrModels = await asrEngine.models()
         let asrModel = asrModels.first
         let ttsModels = await ttsEngine.models()
@@ -1541,41 +1649,9 @@ public final class VoxRuntimeService: @unchecked Sendable {
         }
     }
 
-    private func registerInFlightSynthesisGenerate(
-        _ task: Task<Void, Never>,
-        connectionID: String,
-        taskID: String
-    ) {
-        inFlightSynthesisLock.lock()
-        var tasks = inFlightSynthesisGenerates[connectionID] ?? [:]
-        tasks[taskID] = task
-        inFlightSynthesisGenerates[connectionID] = tasks
-        inFlightSynthesisLock.unlock()
-    }
-
-    private func finishInFlightSynthesisGenerate(connectionID: String, taskID: String) {
-        inFlightSynthesisLock.lock()
-        if var tasks = inFlightSynthesisGenerates[connectionID] {
-            tasks.removeValue(forKey: taskID)
-            inFlightSynthesisGenerates[connectionID] = tasks.isEmpty ? nil : tasks
-        }
-        inFlightSynthesisLock.unlock()
-    }
-
-    private func cancelInFlightSynthesisGenerates(connectionID: String) {
-        inFlightSynthesisLock.lock()
-        let tasks = inFlightSynthesisGenerates.removeValue(forKey: connectionID) ?? [:]
-        inFlightSynthesisLock.unlock()
-
-        guard !tasks.isEmpty else { return }
-        log.warning("Connection \(connectionID) closed, cancelling \(tasks.count) in-flight synthesize.generate request(s)")
-        for task in tasks.values {
-            task.cancel()
-        }
-    }
-
     private func handleDisconnect(connectionID: String) async {
-        cancelInFlightSynthesisGenerates(connectionID: connectionID)
+        annotationTasks.cancel(connectionID: connectionID)
+        synthesisTasks.cancel(connectionID: connectionID)
 
         if let session = sessions.finish(connectionID: connectionID) {
             await recorder.cancel()
@@ -1623,4 +1699,21 @@ struct ASRRouteTranscriptionResult: Sendable {
 struct AnnotationRouteResult: Sendable {
     let output: AnnotationOutput
     let performanceSample: PerformanceSample
+}
+
+private struct StreamParameters: Sendable {
+    let sessionId: String?
+    let connectionID: String?
+    let clientId: String?
+    let modelId: String?
+    let sequence: Int?
+    let audioBase64: String?
+    init(_ params: [String: Any]?) {
+        sessionId = params?["sessionId"] as? String
+        connectionID = params?["_connectionID"] as? String
+        clientId = params?["clientId"] as? String
+        modelId = params?["modelId"] as? String
+        sequence = params?["sequence"] as? Int
+        audioBase64 = params?["audioBase64"] as? String
+    }
 }

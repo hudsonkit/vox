@@ -30,6 +30,7 @@ Catalog JSON may include `plugins[]`. Plugin install is a CLI file-system action
 
 ### Transcription
 
+- `transcribe.stream.start`, `transcribe.stream.append`, `transcribe.stream.finish`, `transcribe.stream.cancel`, `transcribe.stream.status` (app-captured PCM; [wire contract](./runtime.md#pcm-wire-contract))
 - `transcribe.file`
 - `transcribe.startSession`
 - `transcribe.sessionStatus`
@@ -38,7 +39,8 @@ Catalog JSON may include `plugins[]`. Plugin install is a CLI file-system action
 
 ### Annotation
 
-- `annotate.file`
+- `annotation.models` (explicit cloud capability inventory)
+- `annotate.file` ([request, evidence and limits](./runtime.md#file-annotation))
 
 ### History
 
@@ -64,6 +66,7 @@ type PerformanceRoute =
   | "annotate.file"
   | "transcribe.file"
   | "transcribe.live"
+  | "transcribe.streaming"
   | "synthesize.generate"
   | "synthesize.startSession"
   | string;
@@ -107,6 +110,7 @@ Current emitted performance routes:
 - `transcribe.file`
 - `annotate.file`
 - `transcribe.live`
+- `transcribe.streaming`
 - `synthesize.generate`
 - `synthesize.startSession`
 
@@ -243,7 +247,10 @@ interface AttributedWordTiming {
   word: string;
   start: number;
   end: number;
-  confidence: number;
+  confidence: number | null;
+  logProbability?: number | null;
+  speakerConfidence?: number | null;
+  language?: string | null;
   speakerId?: string | null;
 }
 
@@ -269,6 +276,18 @@ interface FileAnnotationResult {
   metrics?: AnnotationMetrics;
   words: AttributedWordTiming[];
   speakers: SpeakerSegment[];
+  providerId?: string | null;
+  providerRequestId?: string | null;
+  providerModelIds?: string[];
+  duration?: number | null;
+  durationSource?: string | null;
+  language?: string | null;
+  languageConfidence?: number | null;
+  languages?: string[];
+  audioEvents?: Array<{label: string; start: number; end: number; speakerId?: string | null; logProbability?: number | null}>;
+  speakerSegmentsSource?: string | null;
+  unsupportedFields?: string[];
+  unavailableFields?: string[];
 }
 
 interface SynthesisOptions {

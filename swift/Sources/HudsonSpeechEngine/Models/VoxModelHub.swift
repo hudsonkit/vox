@@ -51,16 +51,16 @@ enum VoxModelHub {
         return url
     }
 
-    static func resolveModelURL(_ repoPath: String, _ filePath: String) throws -> URL {
-        let urlString = "\(baseURL)/\(repoPath)/resolve/main/\(filePath)"
+    static func resolveModelURL(_ repoPath: String, _ filePath: String, revision: String = "main") throws -> URL {
+        let urlString = "\(baseURL)/\(repoPath)/resolve/\(revision)/\(filePath)"
         guard let url = URL(string: urlString) else {
             throw VoxModelHubError.invalidURL(urlString)
         }
         return url
     }
 
-    static func listDirectory(repoPath: String, path: String) async throws -> [[String: Any]] {
-        let apiPath = path.isEmpty ? "tree/main" : "tree/main/\(path)"
+    static func listDirectory(repoPath: String, path: String, revision: String = "main") async throws -> [[String: Any]] {
+        let apiPath = path.isEmpty ? "tree/\(revision)" : "tree/\(revision)/\(path)"
         let url = try apiModelsURL(repoPath, apiPath)
         let request = authorizedRequest(url: url)
         let (data, response) = try await sharedSession.data(for: request)
@@ -83,7 +83,8 @@ enum VoxModelHub {
     static func downloadFile(
         repoPath: String,
         remotePath: String,
-        to destinationURL: URL
+        to destinationURL: URL,
+        revision: String = "main"
     ) async throws {
         if FileManager.default.fileExists(atPath: destinationURL.path) {
             return
@@ -93,7 +94,7 @@ enum VoxModelHub {
         try createDirectoryRobustly(at: parentDirectory)
 
         let encodedPath = remotePath.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? remotePath
-        let url = try resolveModelURL(repoPath, encodedPath)
+        let url = try resolveModelURL(repoPath, encodedPath, revision: revision)
         let request = authorizedRequest(url: url)
         let (temporaryURL, response) = try await sharedSession.download(for: request)
 

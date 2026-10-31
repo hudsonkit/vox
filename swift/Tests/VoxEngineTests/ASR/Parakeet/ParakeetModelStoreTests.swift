@@ -33,6 +33,9 @@ struct ParakeetModelStoreTests {
         try Data("{\"0\":\"<unk>\",\"1\":\"hello\"}".utf8)
             .write(to: installDirectory.appendingPathComponent(manifest.vocabularyFile))
 
+        // Empty .mlmodelc directories must remain uninstalled, even with vocabulary present.
+        #expect(!store.isInstalled(fileManager: .default))
+        try writeInstalledArtifacts(for: manifest, to: installDirectory)
         let customStore = ParakeetModelStore(manifest: manifest)
         let installed = customStore.installedDirectory(
             fileManager: FileManager.default,
@@ -127,6 +130,13 @@ private func writeInstalledArtifacts(for manifest: ParakeetModelManifest, to dir
         )
     }
 
+    for model in manifest.requiredModelFiles {
+        for artifact in ["coremldata.bin", "model.mil", "weights/weight.bin"] {
+            let path = directory.appendingPathComponent(model).appendingPathComponent(artifact)
+            try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data([1]).write(to: path)
+        }
+    }
     try Data("{\"0\":\"<unk>\",\"1\":\"hello\"}".utf8)
         .write(to: directory.appendingPathComponent(manifest.vocabularyFile))
 }

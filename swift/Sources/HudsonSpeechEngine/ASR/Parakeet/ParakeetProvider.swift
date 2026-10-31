@@ -9,11 +9,18 @@ public final class ParakeetProvider: @unchecked Sendable, ASRProvider {
     private var engines: [String: Engine] = [:]
     private let engineLock = NSLock()
 
-    private struct Engine {
+    private struct Engine: Sendable {
         let manifest: ParakeetModelManifest
         let store: ParakeetModelStore
         let runtime: any ParakeetRuntime
+        let operations = ParakeetOperations()
     }
+
+    private final class SharedEngines: @unchecked Sendable {
+        let lock = NSLock()
+        var engines: [String: Engine] = [:]
+    }
+    private static let sharedEngines = SharedEngines()
 
     public init(catalogStore: ModelCatalogStore = .shared) {
         self.catalogStore = catalogStore
@@ -40,6 +47,12 @@ public final class ParakeetProvider: @unchecked Sendable, ASRProvider {
         ]
     }
 
+    /// Fixture seam for proving multiple provider owners share one lifecycle gate.
+    init(sharing other: ParakeetProvider) {
+        self.catalogStore = nil; self.manifests = other.manifests; self.audioLoader = other.audioLoader
+        self.engines = other.engineLock.withLock { other.engines }
+    }
+
     public func models() async -> [ASRModelInfo] {
         var infos: [ASRModelInfo] = []
         for manifest in resolvedManifests() {
@@ -48,23 +61,54 @@ public final class ParakeetProvider: @unchecked Sendable, ASRProvider {
         return infos
     }
 
-    public func install(
-        modelId: String,
-        progress: @escaping @Sendable (ModelProgress) -> Void
-    ) async throws -> ASRModelInfo {
-        try await ensureLoaded(modelId: modelId, progress: progress)
+    /// Download/validate only. Core ML load and priming belong to explicit preload.
+    public func install(modelId: String, progress: @escaping @Sendable (ModelProgress) -> Void) async throws -> ASRModelInfo {
+        let engine = try resolveEngine(modelId: modelId)
+        return try await engine.operations.withUse(runtime: engine.runtime) {
+            _ = try await engine.operations.installed(engine.store, progress: progress)
+            progress(ModelProgress(modelId: modelId, progress: 1, status: "installed"))
+            return await self.modelInfo(for: engine)
+        }
     }
-
-    public func preload(
-        modelId: String,
-        progress: @escaping @Sendable (ModelProgress) -> Void
-    ) async throws -> ASRModelInfo {
-        try await ensureLoaded(modelId: modelId, progress: progress)
+    public func preload(modelId: String, progress: @escaping @Sendable (ModelProgress) -> Void) async throws -> ASRModelInfo {
+        let engine = try resolveEngine(modelId: modelId)
+        return try await engine.operations.withUse(runtime: engine.runtime) { try await self.ensureLoaded(engine: engine, progress: progress) }
+    }
+    /// Read-only location of this engine's Vox-owned revision. Does not create files.
+    public func modelDirectory(modelId: String) throws -> URL {
+        try resolveEngine(modelId: modelId).store.ownedDirectory()
+    }
+    /// Release the shared model session, not merely this provider's local reference.
+    public func unload(modelId: String) async throws -> ASRModelInfo {
+        let engine = try resolveEngine(modelId: modelId)
+        return try await engine.operations.withExclusive {
+            try await engine.runtime.unload()
+            return await self.modelInfo(for: engine)
+        }
+    }
+    /// Unload then delete only this owned revision. Never deletes the store root,
+    /// other models, external FluidAudio caches, or Core ML's system caches.
+    public func deleteModel(modelId: String) async throws -> ASRModelInfo {
+        let engine = try resolveEngine(modelId: modelId)
+        return try await engine.operations.withExclusive {
+            try await engine.runtime.unload()
+            try engine.store.removeInstallation()
+            return await self.modelInfo(for: engine)
+        }
+    }
+    /// Zero disables idle unloading. Does not cancel an admitted operation.
+    public func setIdleUnload(modelId: String, seconds: Double) async throws {
+        let engine = try resolveEngine(modelId: modelId)
+        try await engine.operations.withUse(runtime: engine.runtime) { try await engine.runtime.setIdleUnload(seconds: seconds) }
     }
 
     public func transcribe(url: URL, modelId: String) async throws -> TranscriptionOutput {
-        let trace = TranscriptionTrace()
         let engine = try resolveEngine(modelId: modelId)
+        return try await engine.operations.withUse(runtime: engine.runtime) { try await self.transcribe(url: url, engine: engine) }
+    }
+
+    private func transcribe(url: URL, engine: Engine) async throws -> TranscriptionOutput {
+        let trace = TranscriptionTrace()
 
         trace.begin("file_check")
         try validateAudioFile(url: url)
@@ -78,7 +122,7 @@ public final class ParakeetProvider: @unchecked Sendable, ASRProvider {
         if !wasPreloaded {
             trace.begin("model_load")
         }
-        _ = try await ensureLoaded(modelId: modelId) { _ in }
+        _ = try await ensureLoaded(engine: engine) { _ in }
         if !wasPreloaded {
             trace.end("initialized")
         }
@@ -166,34 +210,41 @@ public final class ParakeetProvider: @unchecked Sendable, ASRProvider {
         if let existing = engines[manifest.modelId] {
             return existing
         }
+        Self.sharedEngines.lock.lock()
+        defer { Self.sharedEngines.lock.unlock() }
+        if let shared = Self.sharedEngines.engines[manifest.modelId] { return shared }
         let created = Engine(
             manifest: manifest,
             store: ParakeetModelStore(manifest: manifest),
             runtime: ParakeetCoreMLRuntime(manifest: manifest)
         )
+        Self.sharedEngines.engines[manifest.modelId] = created
         engines[manifest.modelId] = created
         return created
     }
 
     private func ensureLoaded(
-        modelId: String,
+        engine: Engine,
         progress: @escaping @Sendable (ModelProgress) -> Void
     ) async throws -> ASRModelInfo {
-        let engine = try resolveEngine(modelId: modelId)
-        let installedDirectory = try await engine.store.ensureInstalled(progress: progress)
+        guard engine.runtime.isAvailable else { throw StreamingASRError.unavailable("Parakeet ANE inference requires supported Apple hardware, not Simulator") }
+        let installedDirectory = try await engine.operations.installed(engine.store, progress: progress)
         try await engine.runtime.load(from: installedDirectory, progress: progress)
         log.info("\(engine.manifest.name) loaded")
         return await modelInfo(for: engine)
     }
 
     private func modelInfo(for engine: Engine) async -> ASRModelInfo {
-        ASRModelInfo(
+        let snapshot = await engine.runtime.snapshot()
+        return ASRModelInfo(
             id: engine.manifest.modelId,
             name: engine.manifest.name,
             backend: engine.manifest.backend,
             installed: engine.store.isInstalled(),
-            preloaded: await engine.runtime.isPreloaded(),
-            available: engine.runtime.isAvailable
+            preloaded: snapshot.preloaded,
+            available: engine.runtime.isAvailable,
+            computePlacement: snapshot.placement,
+            idleUnloadSeconds: snapshot.idleUnloadSeconds
         )
     }
 }

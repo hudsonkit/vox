@@ -179,14 +179,19 @@ Notes:
 - Vox supports Apple Silicon only. Do not treat successful remote-provider compilation on an Intel host as a supported configuration.
 - Register ASR and TTS as separate entries even when they share the same `id`.
 - `models` is optional for external providers now. Vox can call `models()` and route dynamically from the returned list.
-- OpenAI, NVIDIA Magpie, Groq, and Gemini/Google accept per-request `credentials` on `synthesize.generate` / companion synthesis. Those keys are allowlisted through `VoxRuntimeService` and `VoxBridge`; unknown keys, including ElevenLabs and MiniMax keys, are dropped. ElevenLabs and MiniMax currently read only provider `env` and the process environment.
+- OpenAI, ElevenLabs, NVIDIA Magpie, Groq, and Gemini/Google accept per-request `credentials` on `synthesize.generate` / companion synthesis. Those keys are allowlisted through `VoxRuntimeService` and `VoxBridge`; unknown keys, including MiniMax keys, are dropped. MiniMax currently reads only provider `env` and the process environment.
 - Credential order for the providers that accept lent keys is per-request `credentials`, then provider `env`, then the process environment. An explicit provider `env` key or alias, even empty or whitespace, fences process fallback for both configured credential resolution and default model selection so a host can lend keys per request without inheriting an ambient secret. Process env is consulted only when no relevant credential key is present in provider `env` (including when `env` is omitted). Values are never logged or stored by the allowlist parser.
-- NVIDIA Magpie, Groq, and Gemini synthesis HTTP errors redact the exact request text before a vendor body can be persisted or logged. JSON diagnostics keep useful vendor detail after secret and exact-prompt redaction. Plain-text non-JSON bodies fail closed whenever synthesis sensitive values (prompt or instructions) are supplied, including distinctive fragments such as `quota: ` plus a short prompt prefix. Voice discovery has no prompt and is not covered by that fail-closed path. This sanitization applies to these new remote providers; OpenAI, ElevenLabs, MiniMax, and AVSpeech keep their existing error surfaces.
+- NVIDIA Magpie, Groq, and Gemini synthesis HTTP errors redact the exact request text before a vendor body can be persisted or logged. JSON diagnostics keep useful vendor detail after secret and exact-prompt redaction. Plain-text non-JSON bodies fail closed whenever synthesis sensitive values (prompt or instructions) are supplied, including distinctive fragments such as `quota: ` plus a short prompt prefix. Voice discovery has no prompt and is not covered by that fail-closed path. This sanitization applies to these new remote providers; OpenAI, MiniMax, and AVSpeech keep their existing error surfaces. ElevenLabs HTTP failures expose only the status code, never a vendor body that could echo a credential or text.
+- ElevenLabs accepts `credentials.ELEVENLABS_API_KEY` (`elevenlabsApiKey` / `elevenlabs_api_key` aliases) for synthesis and RPC voice discovery. Voice discovery with credentials requires an explicit `modelId`; unsupported built-in providers return an error instead of ignoring the key. OpenAI's static voice catalog also accepts scoped credentials. The browser HTTP voice-list route does not accept keys in a URL.
+- External adapters receive scoped voice credentials through the provider protocol and must honor that contract. This change verifies the bundled `voxttsd` path, not arbitrary third-party adapter implementations. Lend only the selected provider's key, not an entire credential store.
+- A lent ElevenLabs key is a request-local value. It does not change provider configuration, process environment, credentials files, model availability, or another client's account. Defaults use an ephemeral URLSession without disk/cache/cookie/credential storage; requests carry `Cache-Control: no-store`. Custom injected sessions are owned by the embed caller. No global key is needed for an explicitly selected ElevenLabs model with a lent key. Availability inventories describe daemon-configured credentials, not a previously borrowed key.
+- ElevenLabs WAV output defaults to `wav_44100`, correcting the invalid legacy `wav_44100_128` value. The [official API format list](https://elevenlabs.io/docs/api-reference/text-to-speech/convert) supports `wav_44100`; 44.1 kHz WAV requires the applicable account tier. Set `ELEVENLABS_OUTPUT_FORMAT` explicitly for another supported WAV rate. There is no silent tier/model/provider fallback. Invalid non-WAV success bodies are rejected before becoming audio output.
 - `ELEVENLABS_BASE_URL`, `ELEVENLABS_OUTPUT_FORMAT`, `MINIMAX_BASE_URL`, `NVIDIA_TTS_URL`, `NVIDIA_VOICES_URL`, `GROQ_BASE_URL`, and `GEMINI_BASE_URL` can override vendor defaults.
 - NVIDIA Magpie accepts `NV_API_KEY` and the `NVIDIA_API_KEY` compatibility alias, plus camelCase / snake_case variants. Gemini accepts `GEMINI_API_KEY`, `GOOGLE_API_KEY`, and `GOOGLE_GENAI_API_KEY`.
 - Remote providers are considered for default model selection and in-process default registration only when they are configured in `providers.json` or the daemon environment. An API key in the process environment is not broader user consent than selecting or configuring that provider. Configured aliases such as `magpie`, `groq-tts`, and `google-tts` prevent the canonical default entries from being appended over that family's routing and key config.
 - If `providers.json` contains only ASR entries, Vox falls back to default TTS providers. The inverse is also true. The default TTS model remains `gpt-4o-mini-tts` when OpenAI is configured. App-registry and daemon/config default selection share one canonical ranking independent of `providers.json` order and independent of the alphabetically sorted `TTSProviderRegistry` model list: OpenAI `gpt-4o-mini-tts`, then ElevenLabs, MiniMax, NVIDIA Magpie, Groq, Gemini, then `avspeech:system`.
-- The public ASR provider method is currently file-based. Apple SpeechTranscriber and Nemotron have streaming-capable internals, but live partial events require a separate runtime/protocol integration.
+- `ASRProvider.transcribe` and the external provider protocol remain file-based. Native Core ML streaming has a separate PCM API, `NativeStreamingASR.shared`, and companion `transcribe.stream.*` routes. These emit model-backed cumulative partials; see [Runtime](./runtime.md#native-pcm-streaming).
+- Native Parakeet batch word timings group BPE/SentencePiece pieces at whitespace boundaries, including punctuation. Spans use min/max model-token intervals; confidence is the minimum piece score. These are 80 ms TDT frame estimates, not forced alignment or language-specific word segmentation. Long-file timing uses the merged token stream. Missing alignment is returned as no timings, never invented token labels or truncated tail timestamps.
 - Native audio adaptation uses `AVAudioConverter`, SpeechAnalyzer's file path, or provider-owned conversion. Provider adapters must not implement ad hoc resampling or denoising.
 
 ### OpenAI TTS timeout
@@ -657,3 +662,38 @@ Then select it via CLI or SDK by specifying the target model ID.
 Vox spawns the provider process on first use. It stays alive for the daemon's lifetime. If it crashes, Vox restarts it on the next request.
 
 Providers should be stateless between requests. The provider process can keep model weights in memory, but Vox assumes nothing about that state -- a crash and restart must not break anything.
+
+## Request-scoped TTS cancellation
+
+The stock daemon enables this extension for its matching bundled `voxttsd`.
+A compatible custom external TTS entry can opt in with
+`"supportsRequestCancellation": true`. Do not set it for an older helper or a
+provider that cannot cancel by transport ID. The field defaults to absent/false;
+legacy providers still support cancelling the local await, but remote work can
+continue. Cancellation never terminates the shared provider process.
+
+When an awaiting task cancels or its transport deadline expires, `StdioTransport`
+removes that pending call and optionally sends this JSON-RPC notification:
+
+```json
+{"jsonrpc":"2.0","method":"$/cancelRequest","params":{"id":17}}
+```
+
+`params.id` is the numeric JSON-RPC call ID, not the synthesis request UUID,
+client ID, model ID or voice ID. Notifications have no outer ID or acknowledgement.
+Unknown/completed IDs are ignored. The bundled helper cancels only that task and
+can return error code `-32800` / `request_cancelled`; the host ignores late replies
+for already-cancelled calls. Pending calls cannot resume twice.
+
+The helper admits at most 16 requests and rejects excess with a busy error. A
+bounded 1 MiB stdin frame reader runs on a dedicated thread, not MainActor or a
+cooperative executor. The reader continues servicing cancellation while synthesis
+awaits HTTP or AVFoundation. Parent EOF cancels and drains accepted tasks. Output
+lines and host request/cancel writes are serialized so simultaneous callers cannot
+interleave JSON frames. The host rejects oversized opted-in requests before sending;
+the helper drains an oversized frame without cancelling unrelated tasks. No request keys or prompt bodies are logged by this path.
+
+This extension is currently wired for external TTS, not the external ASR process
+protocol. Public daemon synthesis-session cancellation and native ASR residency
+are unchanged. HTTP cancellation cannot guarantee vendor-side cancellation or
+billing outcome.

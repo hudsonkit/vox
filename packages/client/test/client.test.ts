@@ -2,6 +2,19 @@ import { VoxClient } from "../src/client.ts";
 import { STREAM_TIMEOUT_MS } from "../src/constants.ts";
 
 describe("VoxClient", () => {
+  it("forwards selected-account voice credentials only on that call", async () => {
+    const client = new VoxClient({ clientId: "talkie" });
+    const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
+    (client as any).transport = { call: async (method: string, params: Record<string, unknown>) => {
+      calls.push({ method, params }); return { voices: [] };
+    } };
+    await client.listVoices("eleven_multilingual_v2", { ELEVENLABS_API_KEY: "selected-account-test-key" });
+    await client.listVoices("eleven_multilingual_v2");
+    expect(calls[0]).toEqual({ method: "synthesize.voices", params: { clientId: "talkie",
+      modelId: "eleven_multilingual_v2", credentials: { ELEVENLABS_API_KEY: "selected-account-test-key" } } });
+    expect(calls[1]?.params.credentials).toBeUndefined();
+  });
+
   it("uses the streaming timeout budget for file transcription", async () => {
     const calls: Array<{ method: string; params: Record<string, unknown>; timeoutMs: number }> = [];
     const client = new VoxClient({ clientId: "test-client" }) as unknown as {
@@ -135,7 +148,7 @@ describe("VoxClient", () => {
     });
   });
 
-  it("uses the streaming timeout budget for annotation and parses speaker output", async () => {
+  it("uses the explicit cloud annotation timeout budget and parses speaker output", async () => {
     const calls: Array<{ method: string; params: Record<string, unknown>; timeoutMs: number }> = [];
     const client = new VoxClient({ clientId: "test-client" }) as unknown as {
       transport: {
@@ -169,6 +182,7 @@ describe("VoxClient", () => {
     };
 
     const result = await client.annotateFile("/tmp/sample.wav", {
+      modelId: "speaker-diarization:v1",
       text: "hello world",
       words: [
         { word: "hello", start: 0.01, end: 0.2, confidence: 0.98 },
@@ -191,7 +205,7 @@ describe("VoxClient", () => {
             { word: "hello", start: 0.01, end: 0.2, confidence: 0.98 },
           ],
         },
-        timeoutMs: STREAM_TIMEOUT_MS,
+        timeoutMs: 3_600_000,
       },
     ]);
   });

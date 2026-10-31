@@ -13,7 +13,7 @@
 - native core ASR: `apple:speech-transcriber` on macOS 26+
 - Apple locale env: `VOX_APPLE_SPEECH_LOCALE`
 - recommended MLX candidates: `mlx-community/Qwen3-ASR-1.7B-8bit`, `mlx-community/cohere-transcribe-03-2026-mlx-8bit`, `mlx-community/nemotron-3.5-asr-streaming-0.6b-8bit`
-- catalog capability flags describe the current Vox provider surface; `liveTranscription=false` until the ASR protocol and mic path emit model-backed partials
+- Native coreml-streaming models have liveTranscription=true through NativeStreamingASR.shared / transcribe.stream.*; file-only models remain false. Old daemon-microphone startSession remains record-then-transcribe.
 - never add hand-written resampling or denoising inside a model adapter; use platform/provider DSP libraries
 - OpenAI file ASR: `gpt-transcribe`, `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, `whisper-1`
 - plugins CLI: `vox plugins list|install|remove`
@@ -28,3 +28,12 @@
 - Whistle adapter uses Symphonia/Rubato for audio conversion; `liveTranscription=false`
 - Whistle assets: `VOX_HOME/models/whistle`; transcribe can cold-load installed assets but cannot download them
 - Whistle env: `VOX_WHISTLE_LANGUAGE` (en/de/fr/es/it/nl/pl, unset auto), `VOX_WHISTLE_KEYWORDS` (comma-separated)
+
+- Native ASR requires Apple Silicon, macOS 14.4 / iOS 17.4 for compute-plan verification.
+- Default live id: StreamingASRDefaults.modelId; file default: parakeet:v3, pinned 7dd20fe (August 19 conversion).
+- Models/preload surfaces include planned computePlacement; streaming status exposes residency and owner.
+- CoreML streaming installation is disk-only; preload explicitly loads/primes; idle unload default macOS 900 s / iOS 60 s; native inventory exposes actual idleUnloadSeconds.
+- Batch and streaming share one process-wide native model slot; multiple app processes use one authenticated private Unix host.
+
+- Current live default: nemotron:unified-560ms (Nemotron Labs Unified, Oct 28 conversion bd13ddd); 160 ms stride + 400 ms right context, buffered re-encode, not encoder-cache streaming.
+- Nemotron 3.5 Latin cache-aware alternative: nemotron:streaming-560ms, 560 ms chunks.

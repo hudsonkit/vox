@@ -21,6 +21,7 @@ These families run without a plugin:
 
 | Family | Default or typical ids | How it runs |
 |---|---|---|
+| `coreml-streaming` | `nemotron:unified-560ms` (default live), `parakeet:eou-320ms` | Native Swift/Core ML streaming; verified ANE encoder |
 | `parakeet-tdt` | `parakeet:v3` (default), `parakeet:v2` (English) | On-device CoreML |
 | `apple-speech` | `apple:speech-transcriber` | On-device Speech framework; macOS 26+ |
 | `openai-transcribe` | `gpt-transcribe`, `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, `whisper-1` | OpenAI Audio API; needs `OPENAI_API_KEY` |
@@ -32,13 +33,17 @@ Apple SpeechTranscriber is registered by the default daemon, so selecting its mo
 
 ## Current local shortlist
 
-- `parakeet:v3`: default, mature CoreML path, 25 European languages.
+- `nemotron:unified-560ms`: default native live model, October 28 Core ML conversion, 25 European languages. Buffered streaming with a 160 ms stride and 400 ms right context.
+- `nemotron:streaming-560ms`: cache-aware Nemotron 3.5 Latin alternative when earlier first partials matter more than the measured quality/memory advantage of Unified.
+- `parakeet:v3`: default file model, mature CoreML path, 25 European languages.
 - `apple:speech-transcriber`: system-managed on-device parity option with word timings on macOS 26+.
 - `mlx-community/Qwen3-ASR-1.7B-8bit`: multilingual accuracy candidate on Apple Silicon.
 - `mlx-community/cohere-transcribe-03-2026-mlx-8bit`: strong offline multilingual candidate; not a realtime model.
 - `mlx-community/nemotron-3.5-asr-streaming-0.6b-8bit`: 0.6B cache-aware streaming RNNT candidate covering 35 languages.
 
-Catalog `capabilities.liveTranscription` describes what Vox exposes today, not what an upstream model architecture can theoretically do. It remains `false` for every current provider because Vox's public ASR contract still accepts a completed audio file and returns finalized text. Apple and Nemotron are streaming-capable foundations for the next runtime slice, but selecting them does not yet turn `session.partial` into model-backed partial transcription.
+Catalog `capabilities.liveTranscription` describes the Vox surface, not just the upstream model. Native `coreml-streaming` models expose model-backed partials through `NativeStreamingASR.shared` and the app-captured `transcribe.stream.*` routes. Other file-only providers retain `liveTranscription=false`. The older daemon-microphone `transcribe.startSession` flow still transcribes after recording stops.
+
+Native streaming requires Apple Silicon and macOS 14.4 / iOS 17.4, so Vox can verify encoder placement with `MLComputePlan`. Install and preload explicitly. One process-wide native ASR slot serves batch and streaming; idle models unload after a configurable timeout (macOS 900 s / iOS 60 s by default). Native inventory reports the actual `idleUnloadSeconds`. See [Native PCM streaming](./runtime.md#native-pcm-streaming) for ownership, backpressure, timestamps, and endpoint semantics. `parakeet:v3` remains the default file model on the pinned August 19 conversion.
 
 Vox does not ship Intel support. Local runtime entries are marked `architectures: ["arm64"]`. Audio conversion for native model inputs uses platform or provider libraries; do not add hand-written sample-rate conversion or denoising code to a model adapter.
 

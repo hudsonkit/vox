@@ -1,0 +1,56 @@
+{
+  "metadata": {
+    "request_id": "dg-request",
+    "duration": 2,
+    "models": [
+      "actual-model-revision"
+    ]
+  },
+  "results": {
+    "channels": [
+      {
+        "detected_language": "en",
+        "alternatives": [
+          {
+            "transcript": "Hello world.",
+            "words": [
+              {
+                "word": "hello",
+                "punctuated_word": "Hello",
+                "start": 0.1,
+                "end": 0.4,
+                "confidence": 0.97,
+                "speaker": 0,
+                "speaker_confidence": 0.82,
+                "language": "en"
+              },
+              {
+                "word": "world",
+                "punctuated_word": "world.",
+                "start": 0.8,
+                "end": 1.2,
+                "speaker": 1
+              }
+            ],
+            "languages": [
+              "en"
+            ]
+          }
+        ]
+      }
+    ],
+    "utterances": [
+      {
+        "start": 0.1,
+        "end": 0.4,
+        "speaker": 0,
+        "confidence": 0.99
+      },
+      {
+        "start": 0.8,
+        "end": 1.2,
+        "speaker": 1
+      }
+    ]
+  }
+}

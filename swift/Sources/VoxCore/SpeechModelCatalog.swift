@@ -1,6 +1,7 @@
 import Foundation
 
 public enum SpeechModelFamily {
+    public static let coreMLStreaming = "coreml-streaming"
     public static let parakeetTDT = "parakeet-tdt"
     public static let appleSpeech = "apple-speech"
     public static let mlxAudio = "mlx-audio"
@@ -109,10 +110,12 @@ public struct SpeechPluginCatalogEntry: Codable, Sendable, Equatable {
 public struct SpeechModelSource: Codable, Sendable, Equatable {
     public let type: String
     public let repo: String?
+    public let revision: String?
 
-    public init(type: String, repo: String? = nil) {
+    public init(type: String, repo: String? = nil, revision: String? = nil) {
         self.type = type
         self.repo = repo
+        self.revision = revision
     }
 }
 

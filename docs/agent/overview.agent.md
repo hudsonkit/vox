@@ -4,7 +4,7 @@
 - deployment modes:
   - embed mode: Swift packages inside the app process
   - companion mode: `voxd` for web, browser, and shared-process clients
-- default ASR embed engine: `EngineManager()` -> `ParakeetProvider()`
+- default ASR embed engine: `EngineManager()` -> `NativeASRProvider()` (batch Parakeet + explicit native streaming models)
 - default TTS embed engine: `TTSEngineManager()` -> `TTSProviderRegistry`
 - optional Apple TTS playback: `VoxAppleSpeech` / `AppleSpeechOutputController`
 - companion service: `VoxRuntimeService`
