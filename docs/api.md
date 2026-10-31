@@ -57,6 +57,20 @@ Catalog JSON may include `plugins[]`. Plugin install is a CLI file-system action
 - `synthesize.sessionStatus`
 - `synthesize.cancel`
 
+### Voice quality metadata
+
+`synthesize.voices` returns optional `quality` on each voice: `standard`, `enhanced`
+or `premium`. The native Apple provider reads `AVSpeechSynthesisVoice.quality`:
+platform `.default` maps to `standard`; `.enhanced` and `.premium` map directly.
+Unknown platform cases and other backends omit the field. Vox does not infer
+quality from a voice name or identifier. See [Apple's quality enum](https://developer.apple.com/documentation/avfaudio/avspeechsynthesisvoicequality).
+
+Absent or null quality means **unknown**, not `standard`. The `default` selection
+flag is independent of quality. Existing IDs, language, availability and default
+selection are unchanged. Swift `TTSVoiceInfo.quality` is `TTSVoiceQuality?`;
+TypeScript `VoiceInfo.quality` is optional. Swift decoding accepts older data
+without quality and treats unrecognized future quality strings as nil.
+
 ## Performance samples
 
 These fields are present on every performance sample recorded to `~/.vox/performance.jsonl`.

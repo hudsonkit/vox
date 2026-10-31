@@ -1,9 +1,18 @@
 import Foundation
 import VoxClient
+import VoxCore
 
 let a = VoxDaemonClient(clientId: "tts-fixture-client-a")
 let b = VoxDaemonClient(clientId: "tts-fixture-client-b")
 try await a.connectDiscovered(); try await b.connectDiscovered()
+// Real native provider -> bundled helper -> stock private daemon -> public client.
+// Inventory only: no native synthesis, audio playback or ASR model preparation.
+struct VoiceList: Decodable { let voices: [TTSVoiceInfo] }
+let nativeResponse = try await a.call("synthesize.voices", params: ["modelId": "avspeech:system"])
+let native: VoiceList = try nativeResponse.decode()
+precondition(!native.voices.isEmpty)
+precondition(native.voices.contains { $0.quality != nil }, "Native quality was lost on a process/wire hop")
+precondition(native.voices.allSatisfy { $0.backend == "avspeech" && $0.modelId == "avspeech:system" && $0.available })
 let endpoint = URL(string: ProcessInfo.processInfo.environment["TTS_FIXTURE_URL"]!)!
 func params(_ key: String?, openAI: Bool = false, text: String = "fixture-fast") -> [String: JSONValue] {
     var result: [String: JSONValue] = ["modelId": .string(openAI ? "gpt-4o-mini-tts" : "eleven_flash_v2_5"),
@@ -32,6 +41,7 @@ for (client, key, voice) in [(a, "tts-loan-a", "fixture-a"), (b, "tts-loan-b", "
         "credentials": .object(["ELEVENLABS_API_KEY": .string(key)])])
     guard case .array(let voices) = result["voices"] else { fatalError("Missing voices") }
     precondition(voices.first?["id"]?.stringValue == voice)
+    precondition(voices.first?["quality"] == nil, "Cloud quality must stay absent")
 }
 let generatedA = try await a.call("synthesize.generate", params: params("tts-loan-a"))
 precondition(valid(generatedA))

@@ -207,14 +207,20 @@ public actor ExternalTTSProvider: TTSProvider {
             return nil
         }
 
+        let backend = (dict["backend"] as? String) ?? providerId
+        // The bundled native provider reports platform evidence. Other backends
+        // do not have a normalized native quality contract.
+        let quality = backend == "avspeech"
+            ? (dict["quality"] as? String).flatMap(TTSVoiceQuality.init(rawValue:)) : nil
         return TTSVoiceInfo(
             id: id,
             name: name,
             language: dict["language"] as? String,
-            backend: (dict["backend"] as? String) ?? providerId,
+            backend: backend,
             modelId: (dict["modelId"] as? String) ?? requestedModelId ?? TTSDefaults.modelId,
             available: (dict["available"] as? Bool) ?? true,
-            isDefault: (dict["default"] as? Bool) ?? false
+            isDefault: (dict["default"] as? Bool) ?? false,
+            quality: quality
         )
     }
 }

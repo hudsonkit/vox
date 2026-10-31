@@ -23,3 +23,5 @@
 - listVoices(modelId, credentials?) forwards selected-account credentials on that call only; explicit model required with keys. ElevenLabs dynamic voices and OpenAI static catalog support this; other unsupported providers error. Never log credentials; inventory availability stays daemon-configured, not borrowed-account state.
 
 - listAnnotationModels + annotateFile(path, AnnotationOptions) with required explicit modelId, scoped credentials.ELEVENLABS_API_KEY / DEEPGRAM_API_KEY, diarize/tagAudioEvents/languageCode/numSpeakers; timeoutMs default3600000. Nullable confidence, raw logProbability, speakerConfidence; preserve audioEvents, language/duration/provenance and unsupported/unavailable fields. See runtime brief. TS transport remains TCP-only.
+
+- Voice metadata adds optional quality: standard/enhanced/premium. Native Apple provider maps actual AVSpeechSynthesisVoice.quality (.default→standard); other backends and unknown platform cases omit it. Never infer from names/IDs or treat absent/null as standard. IDs/language/available/default selection remain unchanged. Swift TTSVoiceInfo.quality: TTSVoiceQuality?; older data and future unknown strings decode nil.

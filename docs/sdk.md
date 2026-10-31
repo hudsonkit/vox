@@ -36,6 +36,14 @@ console.log(speech.metrics?.synthesisMs);
 client.disconnect();
 ```
 
+## Voice quality
+
+`listVoices()` preserves optional `VoiceInfo.quality`: `standard`, `enhanced`, or
+`premium`. Native Apple voices get this value from the platform quality property,
+not names or identifiers. Other backends omit it. Treat absent/null quality as
+unknown; do not display it as standard. Quality does not change the existing
+`default` selection flag, IDs, language or availability. See [voice metadata](./api.md#voice-quality-metadata).
+
 ## Client Identity
 
 `clientId` is used to attribute latency by consumer, compare route-level behavior across integrations, and support multi-client workflows.

@@ -2375,6 +2375,14 @@ console.log(speech.metrics?.synthesisMs);
 client.disconnect();
 ```
 
+## Voice quality
+
+`listVoices()` preserves optional `VoiceInfo.quality`: `standard`, `enhanced`, or
+`premium`. Native Apple voices get this value from the platform quality property,
+not names or identifiers. Other backends omit it. Treat absent/null quality as
+unknown; do not display it as standard. Quality does not change the existing
+`default` selection flag, IDs, language or availability. See [voice metadata](./api.md#voice-quality-metadata).
+
 ## Client Identity
 
 `clientId` is used to attribute latency by consumer, compare route-level behavior across integrations, and support multi-client workflows.
@@ -2993,6 +3001,20 @@ Catalog JSON may include `plugins[]`. Plugin install is a CLI file-system action
 - `synthesize.sessionStatus`
 - `synthesize.cancel`
 
+### Voice quality metadata
+
+`synthesize.voices` returns optional `quality` on each voice: `standard`, `enhanced`
+or `premium`. The native Apple provider reads `AVSpeechSynthesisVoice.quality`:
+platform `.default` maps to `standard`; `.enhanced` and `.premium` map directly.
+Unknown platform cases and other backends omit the field. Vox does not infer
+quality from a voice name or identifier. See [Apple's quality enum](https://developer.apple.com/documentation/avfaudio/avspeechsynthesisvoicequality).
+
+Absent or null quality means **unknown**, not `standard`. The `default` selection
+flag is independent of quality. Existing IDs, language, availability and default
+selection are unchanged. Swift `TTSVoiceInfo.quality` is `TTSVoiceQuality?`;
+TypeScript `VoiceInfo.quality` is optional. Swift decoding accepts older data
+without quality and treats unrecognized future quality strings as nil.
+
 ## Performance samples
 
 These fields are present on every performance sample recorded to `~/.vox/performance.jsonl`.
@@ -3478,6 +3500,8 @@ Source: docs/agent/api.agent.md
 
 - annotation.models lists elevenlabs:scribe_v2 and deepgram:nova-3 capability/credential requirements; annotate.file requires explicit cloud ID and selected request key. See runtime brief for options/null scores/events/provenance/limits; no implicit cloud default, no ambient key fallback.
 
+- Voice metadata adds optional quality: standard/enhanced/premium. Native Apple provider maps actual AVSpeechSynthesisVoice.quality (.default→standard); other backends and unknown platform cases omit it. Never infer from names/IDs or treat absent/null as standard. IDs/language/available/default selection remain unchanged. Swift TTSVoiceInfo.quality: TTSVoiceQuality?; older data and future unknown strings decode nil.
+
 # Apple Embed Facts
 
 Source: docs/agent/apple-embed.agent.md
@@ -3962,6 +3986,8 @@ Source: docs/agent/sdk.agent.md
 - listVoices(modelId, credentials?) forwards selected-account credentials on that call only; explicit model required with keys. ElevenLabs dynamic voices and OpenAI static catalog support this; other unsupported providers error. Never log credentials; inventory availability stays daemon-configured, not borrowed-account state.
 
 - listAnnotationModels + annotateFile(path, AnnotationOptions) with required explicit modelId, scoped credentials.ELEVENLABS_API_KEY / DEEPGRAM_API_KEY, diarize/tagAudioEvents/languageCode/numSpeakers; timeoutMs default3600000. Nullable confidence, raw logProbability, speakerConfidence; preserve audioEvents, language/duration/provenance and unsupported/unavailable fields. See runtime brief. TS transport remains TCP-only.
+
+- Voice metadata adds optional quality: standard/enhanced/premium. Native Apple provider maps actual AVSpeechSynthesisVoice.quality (.default→standard); other backends and unknown platform cases omit it. Never infer from names/IDs or treat absent/null as standard. IDs/language/available/default selection remain unchanged. Swift TTSVoiceInfo.quality: TTSVoiceQuality?; older data and future unknown strings decode nil.
 
 # Operations Facts
 

@@ -14,3 +14,5 @@
 - SDK: startPCMStream, appendPCMStream, finishPCMStream, cancelPCMStream, nativeStreamingStatus.
 
 - annotation.models lists elevenlabs:scribe_v2 and deepgram:nova-3 capability/credential requirements; annotate.file requires explicit cloud ID and selected request key. See runtime brief for options/null scores/events/provenance/limits; no implicit cloud default, no ambient key fallback.
+
+- Voice metadata adds optional quality: standard/enhanced/premium. Native Apple provider maps actual AVSpeechSynthesisVoice.quality (.default→standard); other backends and unknown platform cases omit it. Never infer from names/IDs or treat absent/null as standard. IDs/language/available/default selection remain unchanged. Swift TTSVoiceInfo.quality: TTSVoiceQuality?; older data and future unknown strings decode nil.

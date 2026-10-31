@@ -2,6 +2,25 @@ import { VoxClient } from "../src/client.ts";
 import { STREAM_TIMEOUT_MS } from "../src/constants.ts";
 
 describe("VoxClient", () => {
+  it("preserves optional native voice quality and legacy absent quality", async () => {
+    const client = new VoxClient({ clientId: "voice-quality-test" });
+    const voices = [
+      ...(["standard", "enhanced", "premium"] as const).map((quality) => ({
+        id: `native-${quality}`, name: "Unchanged", language: "en-GB", backend: "avspeech",
+        modelId: "avspeech:system", available: true, default: quality === "premium", quality,
+      })),
+      { id: "legacy", name: "Premium Name", backend: "avspeech", modelId: "avspeech:system", available: false, default: false },
+      { id: "cloud", name: "Enhanced Name", backend: "cloud", modelId: "cloud:v1", available: true, default: false },
+    ];
+    (client as any).transport = { call: async (method: string) => {
+      expect(method).toBe("synthesize.voices"); return { voices };
+    } };
+    const result = await client.listVoices("avspeech:system");
+    expect(result).toEqual(voices);
+    expect(result[3]?.quality).toBeUndefined();
+    expect(result[4]?.quality).toBeUndefined();
+  });
+
   it("forwards selected-account voice credentials only on that call", async () => {
     const client = new VoxClient({ clientId: "talkie" });
     const calls: Array<{ method: string; params: Record<string, unknown> }> = [];

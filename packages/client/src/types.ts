@@ -116,6 +116,8 @@ export interface VoiceInfo {
   modelId: string;
   available: boolean;
   default: boolean;
+  /** Actual native platform quality; absent/null means unknown, not standard. */
+  quality?: "standard" | "enhanced" | "premium" | null;
 }
 
 export interface ModelProgress {

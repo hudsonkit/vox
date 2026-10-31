@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import Testing
+import VoxCore
 @testable import VoxClient
 import VoxService
 
@@ -26,6 +27,29 @@ private final class Fixture {
 }
 
 struct VoxClientTests {
+    @Test func voiceQualitySurvivesPrivateWireAndOlderVoiceData() async throws {
+        let f = try Fixture()
+        let modern = TTSVoiceInfo(id: "system-id", name: "Native", language: "en-GB", backend: "avspeech",
+                                  modelId: "avspeech:system", available: true, isDefault: true, quality: .premium)
+        let old = TTSVoiceInfo(id: "legacy-id", name: "Premium Name Is Not Evidence", backend: "avspeech",
+                               modelId: "avspeech:system", available: false)
+        f.bridge.handle("synthesize.voices") { _, reply in
+            reply(["voices": [modern.dictionaryValue(), old.dictionaryValue()]], nil)
+        }
+        let client = VoxDaemonClient(clientId: "voice-quality-test")
+        try await client.connect(f.endpoint)
+        do {
+            let response = try await client.call("synthesize.voices", params: ["modelId": "avspeech:system"])
+            struct Voices: Decodable { let voices: [TTSVoiceInfo] }
+            let decoded: Voices = try response.decode()
+            #expect(decoded.voices == [modern, old])
+            await client.disconnect()
+        } catch {
+            await client.disconnect()
+            throw error
+        }
+    }
+
     @Test func privateRPCProgressOwnershipAndConcurrentRequests() async throws {
         let f = try Fixture(), events = Recorder()
         f.bridge.handleStreaming("prepare") { params, progress, reply in
