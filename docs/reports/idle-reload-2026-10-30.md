@@ -30,7 +30,8 @@ All times below are UTC on 2026-10-31. Sizes preserve the units of the source to
 | First preload | Talkie reported 106.132 s; daemon started loading at 01:47:58 and became ready at 01:49:44 |
 | First encoder placement | At 01:49:43: ANE 1379 ops, CPU 6, GPU 0, unknown 294; ANE compute ops 342, CPU compute ops 0; planned ANE cost fraction 0.999587 |
 | First priming | 966 ms, after model loading/placement; not the source of the initial 106 s delay |
-| Second preload after default idle eviction | Started 01:52:00; no placement/session-loaded/ready event through last status poll 02:02:57, over 10 min 57 s pending; completion was not recorded |
+| Initial-load peak, sampled after idle unload | At 01:51:06: footprint 18.1M / peak 95.6M; the peak covers the first preparation, but the current value is **unloaded**, not ready-model steady state |
+| Second preload after default idle eviction | Started 01:52:00; Talkie's final status evidence still preparing at approximately 596 s; no ready/result before the window closed. The daemon log has no subsequent placement/session-loaded/ready event and ends with a models-list request at 02:02:57; that log tail is not another completed status or latency measurement |
 | Sample at 01:54:15 | `MLModel` load → Espresso ANE compiler `build_segment` → `_ANEClient doLoadModel` → synchronous XPC wait for the ANE service |
 | vmmap at 01:55:27 | Physical footprint 1.2G, peak 2.3G; about 1.2G dirty swapped; compiler/load transient, not a measured post-dictation steady state |
 | Early first-load vmmap | 66.5M footprint / 70.9M peak at 01:49:02, **before ready**; cannot establish loaded-model residency |
@@ -45,7 +46,28 @@ memory measurement.
 
 Cleanup metadata records restoration of the old installed Agent, unchanged installed
 executable, and removal of the isolated private capability/socket. No test daemon
-was kept resident to hide the reload issue.
+was kept resident to hide the reload issue. The final Talkie report confirms the
+window is closed and no normal-Agent runtime window remains active.
+
+## Final normal-Agent handoff
+
+Talkie's final `docs/specs/tlk-055-normal-agent-window.md` and safe companion JSON
+record the same daemon revision and the signed normal Agent revision
+`e352f8864791ec34adc2613ba7513c9364bca9c0`. They confirm normal startup and an
+approximately 57 MiB warmed Agent. They do not establish a completed normal-boot
+file transcription, microphone/hotkey/paste acceptance, streaming latency or
+post-dictation footprint. Earlier reduced-boot successes are separate evidence.
+
+Keep the **95.6M initial-load peak** beside the **1.2G current / 2.3G reload peak**.
+The contrast is the unresolved same-model reload case, not a claimed permanent
+leak, confirmed CPU fallback or small whole-host preparation footprint. The first
+run's low peak cannot be substituted for the second preparation's peak.
+
+Talkie reports follow-up revision `c152275` composes the outer XPC/probe budget to
+**720 seconds**: 600 seconds preparation plus 120 seconds inference, retaining
+separate inner limits. This fixes a caller deadline mismatch, not host model load.
+No uncertain request was replayed. No further Agent/runtime test is authorized by
+this handoff. The next measurement gate below requires a new operator-owned window.
 
 ## Root-cause boundary and diagnostics
 
@@ -120,7 +142,8 @@ cannot prove real-model compiler-cache reuse or physical-iOS footprint.
 - Local private annotation/TTS fixture reruns stopped while compiling their fresh
   model-free clients: the filesystem returned `No space left on device`. No fixture
   daemon or vendor request had started. They are not reported as passing reruns;
-  both remain CI gates. An inspection after cleanup found only 1.6 GiB available.
+  both passed on the fresh CI runner for `f66a3af` ([run 41160153490](https://github.com/hudsonkit/vox/actions/runs/41160153490)).
+  An inspection after local cleanup found only 1.6 GiB available.
   This later disk-pressure observation is not a measurement of free space during
   Talkie's earlier compiler stall and does not establish its cause. Record free
   disk space and memory pressure in the next controlled reload comparison too.
