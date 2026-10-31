@@ -63,6 +63,7 @@ struct ReadoutControlsTests {
             try await f.events.wait(.failed, id)
             #expect(f.sink.spoken.isEmpty)
             #expect(f.events.values.last?.error == error.localizedDescription)
+            #expect(f.events.values.last?.controlError == error)
             #expect(f.events.values.last?.options == options)
             #expect(await f.controller.status() == nil)
         }
@@ -77,6 +78,7 @@ struct ReadoutControlsTests {
         let pitched = try await controller.start(request, options: .init(pitchMultiplier: 1.2))
         try await events.wait(.failed, pitched)
         #expect(events.values.last?.error == SpeechOutputControlError.unsupportedPitch.localizedDescription)
+        #expect(events.values.last?.controlError == .unsupportedPitch)
         #expect(await provider.generations == 0 && player.counts[0] == 0)
         let quieter = try await controller.start(request, options: .init(volume: 0.3))
         try await events.wait(.playing, quieter)
@@ -92,6 +94,7 @@ struct ReadoutControlsTests {
             try await rejectedEvents.wait(.failed, id)
             #expect(rejected.counts[0] == 0)
             #expect(rejectedEvents.values.last?.error == SpeechOutputControlError.unsupportedVolume.localizedDescription)
+            #expect(rejectedEvents.values.last?.controlError == .unsupportedVolume)
             #expect(rejected.volumes.count == (advertised ? 1 : 0))
         }
     }

@@ -192,6 +192,8 @@ public struct SpeechOutputEvent: Sendable, Equatable {
     public var synthesis: SpeechSynthesisIdentity
     public var audioOutput: SpeechAudioOutputRoute
     public var error: String?
+    /// Machine-readable output-option/control failure, without parsing localized error text.
+    public var controlError: SpeechOutputControlError?
     public var utf16Range: SpeechUTF16Range?
     public var capabilities: SpeechPlaybackCapabilities
     public var options: SpeechOutputOptions
@@ -206,7 +208,8 @@ public struct SpeechOutputEvent: Sendable, Equatable {
         error: String? = nil,
         utf16Range: SpeechUTF16Range? = nil,
         capabilities: SpeechPlaybackCapabilities = .unavailable,
-        options: SpeechOutputOptions = SpeechOutputOptions()
+        options: SpeechOutputOptions = SpeechOutputOptions(),
+        controlError: SpeechOutputControlError? = nil
     ) {
         self.requestId = requestId
         self.generation = generation
@@ -214,6 +217,7 @@ public struct SpeechOutputEvent: Sendable, Equatable {
         self.synthesis = synthesis
         self.audioOutput = audioOutput
         self.error = error
+        self.controlError = controlError
         self.utf16Range = utf16Range
         self.capabilities = capabilities
         self.options = options

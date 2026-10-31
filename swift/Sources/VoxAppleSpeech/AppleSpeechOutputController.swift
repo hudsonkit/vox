@@ -178,7 +178,8 @@ public actor AppleSpeechOutputController {
                 await self?.finishIfActive(
                     session.generation,
                     phase: .failed,
-                    error: error.localizedDescription
+                    error: error.localizedDescription,
+                    controlError: error as? SpeechOutputControlError
                 )
             }
         }
@@ -372,11 +373,12 @@ public actor AppleSpeechOutputController {
     private func finishIfActive(
         _ generation: UInt64,
         phase: SpeechOutputPhase,
-        error: String? = nil
+        error: String? = nil,
+        controlError: SpeechOutputControlError? = nil
     ) {
         guard isActive(generation), let session = current else { return }
         abandon(session)
-        emit(phase, for: session, error: error)
+        emit(phase, for: session, error: error, controlError: controlError)
         current = nil
     }
 
@@ -400,7 +402,7 @@ public actor AppleSpeechOutputController {
         return session.generation == generation && !session.cancelled
     }
 
-    private func emit(_ phase: SpeechOutputPhase, for session: Session, error: String? = nil, utf16Range: SpeechUTF16Range? = nil) {
+    private func emit(_ phase: SpeechOutputPhase, for session: Session, error: String? = nil, utf16Range: SpeechUTF16Range? = nil, controlError: SpeechOutputControlError? = nil) {
         if phase != .wordRange { session.phase = phase }
         let event = SpeechOutputEvent(
             requestId: session.request.requestId,
@@ -411,7 +413,8 @@ public actor AppleSpeechOutputController {
             error: error,
             utf16Range: utf16Range,
             capabilities: session.capabilities,
-            options: session.options
+            options: session.options,
+            controlError: controlError
         )
         onEvent?(event)
     }

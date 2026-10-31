@@ -977,8 +977,9 @@ sinks default both capabilities to false; a player opting into volume must imple
 `setVolume(_:) -> Bool`. A false return rejects the option.
 
 Unsupported options discovered during asynchronous route/player resolution emit an
-identity-bearing terminal `failed` event (`unsupportedPitch` / `unsupportedVolume`),
-not a successful request with ignored controls. Observe terminal events, not only
+identity-bearing terminal `failed` event with typed `controlError` (`unsupportedPitch`
+/ `unsupportedVolume`) and human-readable `error`, not a successful request with
+ignored controls. Do not parse localized error text to classify unsupported options. Observe terminal events, not only
 the initial `start` return. No generated-audio pitch shift, word alignment or
 provider synthesis pitch/volume parameter is fabricated by this output API.
 
@@ -3688,7 +3689,7 @@ Source: docs/agent/apple-embed.agent.md
 - Per-request local output: start(request,options:SpeechOutputOptions(pitchMultiplier:Double?,volume:Double?)) or throwing speak(request,options:). SynthesisRequest remains generation-only (speed unchanged).
 - Pitch finite 0.5...2.0; volume finite 0...1; nil=platform default. Invalid values throw before replacing current playback; no silent clamp. Explicit values require support, even 1.0.
 - Events/status expose requested options + actual canSetPitch/canSetVolume. System speech applies both before enqueue, preserves through seek/pause/resume, resets defaults on next request.
-- Generated audio: pitch unsupported before synthesis; real player volume applied before play. Custom player volume support is learned after generation. Unsupported/declined options emit terminal failed (unsupportedPitch/unsupportedVolume), never silently ignore. Custom sinks default false; volume-capable players must implement setVolume(_:) -> Bool.
+- Generated audio: pitch unsupported before synthesis; real player volume applied before play. Custom player volume support is learned after generation. Unsupported/declined options emit terminal failed with typed event.controlError (unsupportedPitch/unsupportedVolume) plus human-readable error; never silently ignore or parse localized text. Custom sinks default false; volume-capable players must implement setVolume(_:) -> Bool.
 - new requests replace pending generation/playback
 - stop/cancel are idempotent and must cancel Task, player, and synthesizer during the enqueue window
 - events report resolving/generating, starting, playing, paused, resumed, wordRange, finished, cancelled, failed

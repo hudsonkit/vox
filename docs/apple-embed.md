@@ -336,8 +336,9 @@ sinks default both capabilities to false; a player opting into volume must imple
 `setVolume(_:) -> Bool`. A false return rejects the option.
 
 Unsupported options discovered during asynchronous route/player resolution emit an
-identity-bearing terminal `failed` event (`unsupportedPitch` / `unsupportedVolume`),
-not a successful request with ignored controls. Observe terminal events, not only
+identity-bearing terminal `failed` event with typed `controlError` (`unsupportedPitch`
+/ `unsupportedVolume`) and human-readable `error`, not a successful request with
+ignored controls. Do not parse localized error text to classify unsupported options. Observe terminal events, not only
 the initial `start` return. No generated-audio pitch shift, word alignment or
 provider synthesis pitch/volume parameter is fabricated by this output API.
 

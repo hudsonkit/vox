@@ -55,7 +55,8 @@ Generated audio cannot apply pitch and rejects it before synthesis. The built-in
 player supports genuine local volume. A custom player's capability/setVolume check
 occurs after generation but before play; missing support or false rejects playback.
 Asynchronously discovered unsupported options produce identity-bearing terminal
-failed events, not ignored parameters. Existing custom sinks default unsupported.
+failed events with typed `controlError` and human-readable `error`, not ignored
+parameters or localized-text parsing. Existing custom sinks default unsupported.
 No provider generation options or pitch-shifted generated audio are invented.
 
 Four additional injection tests cover actual utterance pitch/volume values,
