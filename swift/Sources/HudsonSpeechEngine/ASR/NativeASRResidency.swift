@@ -19,6 +19,14 @@ actor NativeASRResidency {
     resident = (modelId, unload)
     return lease
   }
+  /// Model-scoped eviction never steals an active lease or unloads another model.
+  func unload(modelId: String) async throws {
+    guard let previous = resident, previous.id == modelId else { return }
+    guard active == nil else { throw StreamingASRError.busy }
+    let lease = UUID(); active = lease; resident = nil
+    await previous.unload()
+    if active == lease { active = nil }
+  }
   func release(_ lease: UUID) {
     if active == lease { active = nil }
   }

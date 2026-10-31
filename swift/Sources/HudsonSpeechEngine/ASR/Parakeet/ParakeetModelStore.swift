@@ -101,7 +101,8 @@ struct ParakeetModelManifest: Sendable, Equatable {
 struct ParakeetModelStore: Sendable {
     let manifest: ParakeetModelManifest
     private let downloader: any ParakeetModelArtifactDownloader
-    private let preferredModelsRootOverride: URL?
+    private let storageAnchor: URL
+    private let storageParents: [String]
 
     init(
         manifest: ParakeetModelManifest = .v3,
@@ -110,22 +111,24 @@ struct ParakeetModelStore: Sendable {
     ) {
         self.manifest = manifest
         self.downloader = downloader
-        self.preferredModelsRootOverride = preferredModelsRootDirectory
+        self.storageAnchor = preferredModelsRootDirectory ?? RuntimePaths.voxHomeURL()
+        self.storageParents = preferredModelsRootDirectory == nil ? ["cache", "models"] : []
     }
 
     func isInstalled(fileManager: FileManager = .default) -> Bool {
-        installedDirectory(fileManager: fileManager) != nil
+        guard (try? ownedDirectory()) != nil else { return false }
+        return installedDirectory(fileManager: fileManager) != nil
     }
 
     func preferredModelsRootDirectory(fileManager: FileManager = .default) -> URL {
-        if let preferredModelsRootOverride {
-            return preferredModelsRootOverride
-        }
-
-        return RuntimePaths.voxHomeURL()
-            .appendingPathComponent("cache", isDirectory: true)
-            .appendingPathComponent("models", isDirectory: true)
+        storageParents.reduce(storageAnchor) { $0.appendingPathComponent($1, isDirectory: true) }
     }
+
+    private var ownership: ParakeetOwnedStorage {
+        ParakeetOwnedStorage(anchor: storageAnchor, parents: storageParents, manifest: manifest)
+    }
+    func ownedDirectory() throws -> URL { try ownership.directory() }
+    func removeInstallation() throws { try ownership.remove() }
 
     func preferredInstallDirectory(fileManager: FileManager = .default) -> URL {
         preferredModelsRootDirectory(fileManager: fileManager)
@@ -153,6 +156,8 @@ struct ParakeetModelStore: Sendable {
         fileManager: FileManager = .default,
         progress: @escaping @Sendable (ModelProgress) -> Void
     ) async throws -> URL {
+        try Task.checkCancellation()
+        try ownership.prepare()
         if let installed = installedDirectory(fileManager: fileManager) {
             progress(ModelProgress(modelId: manifest.modelId, progress: 0.8, status: "installed"))
             return installed

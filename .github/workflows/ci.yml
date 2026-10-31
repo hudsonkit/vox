@@ -20,6 +20,12 @@ jobs:
       - run: xcrun swift --version
       - name: Root package exports the lightweight Swift client
         run: xcrun swift build --target VoxClient --jobs 3
+      - name: Public native Parakeet consumer compiles for iOS Simulator
+        run: |
+          xcrun swift build --package-path examples/parakeet-lifecycle \
+            --triple arm64-apple-ios17.0-simulator \
+            --sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)" \
+            --scratch-path "$RUNNER_TEMP/vox-parakeet-ios" --jobs 3
       - run: xcrun swift test --package-path swift --jobs 3
       - name: Private speech routes use loopback fixtures, never paid vendors
         run: |

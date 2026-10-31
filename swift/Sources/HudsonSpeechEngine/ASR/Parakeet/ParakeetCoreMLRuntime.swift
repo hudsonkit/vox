@@ -12,7 +12,7 @@ actor ParakeetCoreMLRuntime: ParakeetRuntime {
 
     enum Event: String, Sendable {
         case loadRequested, loadStarted, loadJoined, sessionLoaded, primingStarted, primingFinished, ready, loadFailed
-        case transcriptionJoinedLoad
+        case transcriptionJoinedLoad, sessionReleased
     }
 
     private let log = VoxLog.engine
@@ -23,6 +23,8 @@ actor ParakeetCoreMLRuntime: ParakeetRuntime {
     private var session: Session?
     private var idleTask: Task<Void, Never>?
     private var activeTranscriptions = 0
+    private var unloading = false
+    private var idleSeconds: Double
     private let managesResidency: Bool
     private struct LoadFlight {
         let id: UUID
@@ -60,6 +62,8 @@ actor ParakeetCoreMLRuntime: ParakeetRuntime {
         }
         self.observeEvent = { _ in }
         self.managesResidency = true
+        let configured = ProcessInfo.processInfo.environment["VOX_ASR_IDLE_SECONDS"].flatMap(Double.init) ?? StreamingASRDefaults.idleUnloadSeconds
+        self.idleSeconds = configured.isFinite && configured >= 0 ? configured : StreamingASRDefaults.idleUnloadSeconds
     }
 
     /// Replaces Core ML work while exercising the production runtime lifecycle.
@@ -73,10 +77,12 @@ actor ParakeetCoreMLRuntime: ParakeetRuntime {
         self.loadSession = loadSession
         self.observeEvent = observeEvent
         self.managesResidency = false
+        self.idleSeconds = 0
     }
 
     nonisolated var isAvailable: Bool {
-        #if arch(arm64)
+        if !managesResidency { return true } // injected session fixture, not a Core ML capability claim
+        #if arch(arm64) && !targetEnvironment(simulator)
         if #available(macOS 14.4, iOS 17.4, *) { return true }
         #endif
         return false
@@ -88,6 +94,8 @@ actor ParakeetCoreMLRuntime: ParakeetRuntime {
 
     func load(from directory: URL, progress: @escaping @Sendable (ModelProgress) -> Void) async throws {
         try Task.checkCancellation()
+        guard !unloading else { throw ParakeetLifecycleError.busy }
+        guard !managesResidency || isAvailable else { throw StreamingASRError.unavailable("Parakeet ANE inference requires Apple Silicon and macOS 14.4 / iOS 17.4 hardware") }
         event(.loadRequested)
         if session != nil {
             scheduleIdle()
@@ -138,9 +146,9 @@ actor ParakeetCoreMLRuntime: ParakeetRuntime {
             session = loadedSession
             loadedSession = nil // Only the resident slot owns the model before releasing its lease.
             publishProgress(1.0, status: "ready", flightID: flightID)
+            if let lease { await NativeASRResidency.shared.release(lease) }
             loadFlight = nil
             event(.ready)
-            if let lease { await NativeASRResidency.shared.release(lease) }
             scheduleIdle()
         } catch {
             if let lease { await NativeASRResidency.shared.release(lease) }
@@ -178,6 +186,7 @@ actor ParakeetCoreMLRuntime: ParakeetRuntime {
     }
 
     func transcribe(samples: [Float]) async throws -> ParakeetInferenceResult {
+        guard !unloading else { throw ParakeetLifecycleError.busy }
         if let flight = loadFlight {
             event(.transcriptionJoinedLoad)
             try await flight.task.value
@@ -212,18 +221,39 @@ actor ParakeetCoreMLRuntime: ParakeetRuntime {
         NSError(domain: "VoxEngine", code: 4, userInfo: [NSLocalizedDescriptionKey: "Parakeet runtime is not initialized."])
     }
 
+    func unload() async throws {
+        guard !unloading, activeTranscriptions == 0, loadFlight == nil else { throw ParakeetLifecycleError.busy }
+        unloading = true
+        idleTask?.cancel(); idleTask = nil
+        defer { unloading = false }
+        if managesResidency {
+            do { try await NativeASRResidency.shared.unload(modelId: modelId) }
+            catch { throw ParakeetLifecycleError.busy }
+        }
+        evict() // Also clear an already nonresident session; metadata actors may stay cached.
+    }
+    func setIdleUnload(seconds: Double) throws {
+        guard seconds.isFinite, seconds >= 0 else { throw ParakeetLifecycleError.invalidIdleTimeout }
+        idleSeconds = seconds
+        idleTask?.cancel(); idleTask = nil
+        scheduleIdle()
+    }
+
+    func snapshot() -> ParakeetRuntimeSnapshot { ParakeetRuntimeSnapshot(preloaded: session != nil, placement: session?.placement) }
     func computePlacement() async -> CoreMLPlacement? { session?.placement }
     private func evict() {
+        let hadSession = session != nil
         idleTask?.cancel(); idleTask = nil; session = nil
+        if hadSession { event(.sessionReleased) }
     }
     private func evictIfIdle() {
-        guard activeTranscriptions == 0, loadFlight == nil else { return }
+        guard !unloading, activeTranscriptions == 0, loadFlight == nil else { return }
         evict()
     }
     private func scheduleIdle() {
-        guard managesResidency, activeTranscriptions == 0, loadFlight == nil, session != nil else { return }
+        guard !unloading, activeTranscriptions == 0, loadFlight == nil, session != nil else { return }
         idleTask?.cancel()
-        let seconds = ProcessInfo.processInfo.environment["VOX_ASR_IDLE_SECONDS"].flatMap(Double.init) ?? StreamingASRDefaults.idleUnloadSeconds
+        let seconds = idleSeconds
         guard seconds.isFinite, seconds > 0 else { return }
         idleTask = Task { [weak self] in
             do { try await Task.sleep(for: .seconds(seconds)); await self?.evictIfIdle() } catch { }

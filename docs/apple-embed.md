@@ -51,6 +51,86 @@ Add these product dependencies to the app target:
 
 Only add `VoxService` or `VoxBridge` if the app intentionally embeds companion/runtime behavior. That is not the default Apple app path.
 
+## Embedded Parakeet lifecycle
+
+For an iOS app that owns native batch ASR, keep a concrete `ParakeetProvider`.
+It implements `ASRProvider` and can also be injected into `EngineManager`.
+No daemon, private socket, Python/MLX runtime or FluidAudio loader is required.
+Batch policy remains explicitly `parakeet:v3`. These APIs require a source revision
+containing the lifecycle change; older published package ranges do not provide
+the new unload/delete methods. Pin the integration revision until released.
+
+```swift
+import Foundation
+import VoxCore
+import VoxEngine
+
+let batch = ParakeetProvider()
+let inventory = await batch.models()           // no download, Core ML load or compilation
+let directory = try batch.modelDirectory(modelId: "parakeet:v3") // read-only location
+let installed = try await batch.install(modelId: "parakeet:v3") { event in
+    print(event.status, event.progress)         // download/structural validation only
+}
+let ready = try await batch.preload(modelId: "parakeet:v3") { event in
+    print(event.status, event.progress)         // load, ANE placement check, priming
+}
+try await batch.setIdleUnload(modelId: "parakeet:v3", seconds: 60)
+// The app owns capture and provides a finalized audio file to batch.transcribe.
+let unloaded = try await batch.unload(modelId: "parakeet:v3")
+let deleted = try await batch.deleteModel(modelId: "parakeet:v3")
+```
+
+**Install is now download-only for Parakeet.** Earlier revisions also loaded and
+primed during `install`. Call `preload` explicitly when ready to pay the cold-load
+cost. `installed` means the required bundle files exist, not that their Core ML
+contents have been loaded, compiled or verified for ANE execution. Inventory and
+location lookup never create a model or compile on CPU to validate files.
+
+- `unload(modelId:)` clears the actual shared runtime Session and its model-bearing
+  closures. It returns an `ASRModelInfo` snapshot with `preloaded: false` and no
+  placement. Other provider instances see that same released Session. Cache actors
+  and manifest metadata stay shared; this is not just clearing one app reference.
+- `deleteModel(modelId:)` unloads first, then removes only that Vox-owned revision.
+  It returns the actual installation/runtime snapshot. Missing storage is
+  idempotent. It never deletes siblings, FluidAudio stores, the model-store root,
+  older revision directories or Core ML's system/compiler caches. On a filesystem
+  error deletion may be partial and the runtime can already be unloaded; refresh
+  inventory rather than presenting a cached success state.
+- Both methods throw `ParakeetLifecycleError.busy` while any provider owner has
+  admitted installation, warmup, file preparation or inference for that model.
+  They do not steal active inference. Stop requesting work, wait for admitted work
+  to settle, then retry. Same-model installation and warmup are single-flight;
+  cancelling a waiter does not stop another owner's shared download/load.
+- `setIdleUnload(modelId:seconds:)` is process/model-scoped, including other owners
+  of the shared runtime. Default is 60 s, optionally configured by
+  `VOX_ASR_IDLE_SECONDS`; zero disables idle eviction. Invalid values throw.
+  Idle eviction never interrupts active operations. Cold preparation must remain
+  visible in app UI; do not silently pin models to hide startup cost.
+- Use `modelDirectory(modelId:)` for display or inspection, not caller-owned
+  recursive deletion. Talkie does not need manifest/cache path knowledge.
+  Owned-store deletion uses descriptor-relative traversal without following
+  symlinks below the trusted Vox home. Receipts bind new storage to model ID,
+  repository and revision. Known built-in legacy layouts remain manageable;
+  unreceipted custom nonempty directories and mismatched receipts are refused.
+- The reservation is process-local. Do not share one embedded store across app
+  processes without higher-level ownership coordination. On macOS, intentionally
+  shared clients should continue using `voxd`, not embed a second engine.
+- Unloaded means Vox released its Session references, not a guarantee of immediate
+  RSS reduction or an OS-wide cache purge. Readiness/placement comes from the
+  runtime snapshot, never an app-maintained boolean inferred from a wrapper release.
+
+The shared engine uses its process-selected conversion/store revision. Catalog
+refresh does not hot-swap a cached Parakeet engine; restart the process for a
+conversion revision change. Defaults remain pinned to the current shipped v3
+conversion. No lifecycle method imports a foreign FluidAudio installation.
+
+The complete [`examples/parakeet-lifecycle`](https://github.com/hudsonkit/vox/tree/main/examples/parakeet-lifecycle)
+consumer imports only public `VoxCore`/`VoxEngine` and is compiled for ARM64 iOS
+Simulator in CI. Simulator supports integration compilation, not ANE inference:
+production Parakeet advertises `available: false` there. Native inference requires
+supported Apple Silicon hardware and macOS 14.4 / iOS 17.4 or newer. No physical
+iOS placement, memory or accuracy result is implied by a Simulator build.
+
 ## Minimal local-first service
 
 ```swift
