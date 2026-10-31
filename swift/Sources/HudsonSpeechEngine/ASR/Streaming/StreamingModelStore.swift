@@ -88,7 +88,7 @@ struct StreamingModelStore: Sendable {
     self.root = root
   }
   var directory: URL {
-    (root ?? RuntimePaths.voxHomeURL().appendingPathComponent("cache/models"))
+    (root ?? RuntimePaths.modelsDirectoryURL())
       .appendingPathComponent(spec.id.replacingOccurrences(of: ":", with: "-"))
   }
   private struct Receipt: Codable {

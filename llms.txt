@@ -22,6 +22,7 @@
 - [Command line](/docs/quickstart): Install Vox on your Mac, check its health, and exercise transcription, speech, preload and timings from the terminal.
 - [Swift embed reference](/docs/apple-embed): Every type for running Vox inside a macOS or iOS app, covering dictation, transcription, speech output, timings and packaging.
 - [Runtime](/docs/runtime): Companion request flow, warm-up, sessions, routes, ports, and runtime ownership boundaries.
+- [Isolated native development host](/docs/dev-runtime): Run a named private Vox daemon beside installed apps without changing their service or discovery endpoint.
 - [Models and plugins](/docs/models): Published dictation catalog, built-in families, and how Vox plugins install new ASR runtimes.
 - [Provider Protocol](/docs/providers): How external STT and TTS engines plug into Vox via JSON-RPC over stdin/stdout.
 - [SDK (Companion Client)](/docs/sdk): Typed Bun and Node access to Vox Companion over local WebSocket JSON-RPC.

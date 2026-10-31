@@ -172,13 +172,15 @@ public actor NativeStreamingASR: ASRProvider {
       managesResidency
       ? try await NativeASRResidency.shared.acquire(
         modelId: spec.id, unload: { [weak self] in await self?.evict() }) : nil
+    var loaded: (any StreamingPipeline)?
     do {
       // Clear the prior model before loading another one. Never hold two encoder instances.
       pipeline = nil
       progress(ModelProgress(modelId: spec.id, progress: 0.85, status: "loading"))
-      var loaded: (any StreamingPipeline)? = try await loadPipeline(
+      loaded = try await loadPipeline(
         spec, directory ?? store.directory, language)
       progress(ModelProgress(modelId: spec.id, progress: 0.95, status: "warming"))
+      if managesResidency { try NativePreparationResources.check(modelId: spec.id, phase: "priming") }
       try loaded!.prime()
       pipeline = loaded
       loaded = nil  // Eviction must drop the only model reference after the lease is released.
@@ -186,6 +188,7 @@ public actor NativeStreamingASR: ASRProvider {
       progress(ModelProgress(modelId: spec.id, progress: 1, status: "ready"))
       if let lease { await NativeASRResidency.shared.release(lease) }
     } catch {
+      loaded = nil // Never release residency while a failed temporary pipeline retains models.
       if let lease { await NativeASRResidency.shared.release(lease) }
       throw error
     }

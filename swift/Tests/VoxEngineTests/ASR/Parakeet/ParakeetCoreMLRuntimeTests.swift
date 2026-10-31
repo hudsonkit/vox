@@ -110,16 +110,23 @@ struct ParakeetCoreMLRuntimeTests {
         events.printTrace(label: "canceled-waiter")
     }
 
-    @Test("Priming errors remain best effort and do not discard loaded models")
-    func primingFailurePreservesLoadedSession() async throws {
+    @Test("Failed priming rejects readiness and can be retried without a retained Session")
+    func primingFailureRejectsReadiness() async throws {
         let probe = SessionProbe(failPriming: true)
         await probe.releaseLoading()
         await probe.releasePriming()
         let runtime = ParakeetCoreMLRuntime(loadSession: { _ in try await probe.load() }, observeEvent: { _ in })
+        await #expect(throws: FixtureError.self) {
+            try await runtime.load(from: URL(fileURLWithPath: "/unused-model-fixture")) { _ in }
+        }
+        #expect(await runtime.isPreloaded() == false)
+        #expect(await runtime.computePlacement() == nil)
+        await #expect(throws: Error.self) { try await runtime.transcribe(samples: [5]) }
+        await probe.allowPriming()
         try await runtime.load(from: URL(fileURLWithPath: "/unused-model-fixture")) { _ in }
         #expect(await runtime.isPreloaded())
         #expect(try await runtime.transcribe(samples: [5]).text == "5")
-        #expect(await probe.loadCount == 1)
+        #expect(await probe.loadCount == 2)
     }
 
     @Test("A runtime with no initialization flight rejects transcription")
@@ -160,7 +167,7 @@ private actor SessionProbe {
     private var firstLoadWaiter: CheckedContinuation<Void, Never>?
     private var firstPrimeWaiter: CheckedContinuation<Void, Never>?
     private var failedLoads: Int
-    private let failPriming: Bool
+    private var failPriming: Bool
     private var gateTranscriptions: Bool
     private var transcriptionWaiters: [CheckedContinuation<Void, Never>] = []
     private var twoTranscriptionsWaiter: CheckedContinuation<Void, Never>?
@@ -170,6 +177,8 @@ private actor SessionProbe {
         self.failPriming = failPriming
         self.gateTranscriptions = gateTranscriptions
     }
+
+    func allowPriming() { failPriming = false }
 
     func load() async throws -> ParakeetCoreMLRuntime.Session {
         loadCount += 1

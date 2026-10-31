@@ -524,3 +524,12 @@ Native ASR idle unload defaults to **900 seconds on macOS** and **60 seconds on 
 The bounded desktop window avoids a 60-second eviction between nearby dictations. It does not fix Core ML compilation stalls or guarantee a fast reload. A normal-UI test observed a 106-second first preparation and a second, still-pending ANE load after more than 10 minutes. See the [idle/reload investigation](./reports/idle-reload-2026-10-30.md) before making startup or memory claims. Show explicit prepare progress and propagate the same cold-load deadline through each app/XPC/RPC layer. A client timeout is not proof that an OS compiler operation stopped.
 
 Preload again after eviction. `transcribe.stream.status` and native entries in `models.list` expose the actual configured `idleUnloadSeconds`, residency and planned placement. Core ML load logs separate component `model-load` from encoder `compute-plan`, with start/completion/failure, attempt and elapsed milliseconds. They do not log file paths, request content, credentials or underlying error bodies. Streaming telemetry preserves `clientId`, `route: "transcribe.streaming"`, and `modelId`.
+
+## Isolated development daemon
+
+Use the [named private dev host workflow](./dev-runtime.md) to run Talkie against
+a separate capability beside an installed service. `VOX_MODELS_PATH` explicitly
+shares installed bundles without sharing credentials, history, logs or loaded
+model instances. Preparation rejects insufficient temporary-volume disk and
+critical pressure before compiler stages; failed priming no longer reports ready.
+No model/store/installed-service cleanup is automatic.

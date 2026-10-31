@@ -111,8 +111,9 @@ struct ParakeetModelStore: Sendable {
     ) {
         self.manifest = manifest
         self.downloader = downloader
-        self.storageAnchor = preferredModelsRootDirectory ?? RuntimePaths.voxHomeURL()
-        self.storageParents = preferredModelsRootDirectory == nil ? ["cache", "models"] : []
+        let explicitRoot = preferredModelsRootDirectory ?? RuntimePaths.modelsDirectoryOverrideURL()
+        self.storageAnchor = explicitRoot ?? RuntimePaths.voxHomeURL()
+        self.storageParents = explicitRoot == nil ? ["cache", "models"] : []
     }
 
     func isInstalled(fileManager: FileManager = .default) -> Bool {
