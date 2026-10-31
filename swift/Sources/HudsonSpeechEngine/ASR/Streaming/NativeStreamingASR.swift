@@ -70,7 +70,7 @@ public actor NativeStreamingASR: ASRProvider {
   }
 
   private static var available: Bool {
-    #if arch(arm64)
+    #if arch(arm64) && !targetEnvironment(simulator)
       if #available(macOS 14.4, iOS 17.4, *) { return true }
     #endif
     return false

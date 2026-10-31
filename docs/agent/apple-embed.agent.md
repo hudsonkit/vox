@@ -96,7 +96,13 @@
 - audio-session configuration is injectable and off by default
 - new requests replace pending generation/playback
 - stop/cancel are idempotent and must cancel Task, player, and synthesizer during the enqueue window
-- events report resolving/generating, starting, playing, finished, cancelled, failed
+- events report resolving/generating, starting, playing, paused, resumed, wordRange, finished, cancelled, failed
+- start(SynthesisRequest) throws -> SpeechOutputIdentity(requestId,generation); legacy speak unchanged. status() + events expose actual SpeechPlaybackCapabilities, initially unavailable during resolution.
+- pause(identity)/resume(identity) async throws -> Bool: genuine retained utterance/player, no stop/re-synthesis. System true=accepted, paused/resumed events=delegate acknowledgement; false does not change state. Pause requires playing/resumed, resume requires paused; controlPending until system acknowledgement.
+- seek(identity,toUTF16Offset:) throws -> new identity: live-system only, original-text character boundary before nonempty suffix; same request ID/new generation, cancels old and starts replacement even if previously paused. Invalid offsets leave playback untouched. Generated audio has no ranges or text seek.
+- wordRange carries utf16Range(location,length,nsRange) in ORIGINAL unmodified request text, remapped across seeks; native will-speak evidence only, not playback clock/alignment. Discard invalid/split-surrogate ranges.
+- stop(identity)/cancel(identity)/seek/pause/resume reject stale request OR generation; current-surface no-arg stop/cancel remain. Recheck event.identity after UI hops; caller-queued old events cannot be retracted.
+- Custom sinks default unsupported; opt into playbackCapabilities and genuine controls/identity-bearing callbacks. examples/apple-readout compiles entire output consumer for iOS Simulator in CI. Evidence: reports/apple-readout-controls-2026-10-30.md; no physical-device audible acceptance implied.
 - synthesis identity reports requested vs actual model/voice, not a guessed provider id
 - synthesis identity is separate from the physical audio-output route
 - do not put reply dedupe, markdown flattening, fallback copy, preference storage, queue priority, or telemetry double-recording in this controller
@@ -136,7 +142,7 @@ A packaged app does not fall back to a developer build directory.
 - `finish(sessionId:clientId:)` flushes -> final update; cancel discards.
 - Cumulative text, approximate RNNT words, explicit endpointSource; endpoints do not auto-stop.
 - Process-wide residency shared with batch; idle unload macOS 900 s / iOS 60 s, configurable; native ASRModelInfo.idleUnloadSeconds reports the actual value. Preload again after eviction or model switch; bounded desktop retention does not fix compiler stalls.
-- `status()` exposes actual planned encoder placement from MLComputePlan, not requested computeUnits or a hardware trace.
+- `status()` exposes actual planned encoder placement from MLComputePlan, not requested computeUnits or a hardware trace. Native streaming production inventory/preload excludes Simulator, even ARM64; use physical iOS17.4+ for ANE validation.
 - Several app processes intentionally share one voxd private authenticated Unix endpoint; do not load separate engines per app.
 
 ## Embedded Parakeet ownership

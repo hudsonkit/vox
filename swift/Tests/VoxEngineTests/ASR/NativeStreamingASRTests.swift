@@ -45,6 +45,18 @@ private actor PipelineLoader {
 }
 
 struct NativeStreamingASRTests {
+  @Test("Production streaming inventory requires actual ANE hardware, never Simulator")
+  func platformAvailability() async {
+    let models = await NativeStreamingASR.shared.models()
+    #expect(!models.isEmpty)
+    #if arch(arm64) && !targetEnvironment(simulator)
+    if #available(macOS 14.4, iOS 17.4, *) { #expect(models.allSatisfy { $0.available }) }
+    else { #expect(models.allSatisfy { !$0.available }) }
+    #else
+    #expect(models.allSatisfy { !$0.available })
+    #endif
+  }
+
   @Test("Inventory and warmup report the actual configured idle policy")
   func idlePolicyInventory() async throws {
     let loader = PipelineLoader()

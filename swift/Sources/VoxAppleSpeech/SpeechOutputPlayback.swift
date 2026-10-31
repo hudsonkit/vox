@@ -6,6 +6,9 @@ public struct SystemSpeechEvent: Sendable, Equatable {
         case didStart
         case didFinish
         case didCancel
+        case didPause
+        case didContinue
+        case willSpeakRange(SpeechUTF16Range)
     }
 
     public var kind: Kind
@@ -30,6 +33,15 @@ public protocol SystemSpeechSynthesizing: AnyObject, Sendable {
     func setCallback(_ callback: @escaping @Sendable (SystemSpeechEvent) -> Void)
     func speak(_ utterance: AVSpeechUtterance, generation: UInt64, requestId: String)
     func stop(generation: UInt64)
+    var playbackCapabilities: SpeechPlaybackCapabilities { get }
+    func pause(generation: UInt64) async -> Bool
+    func resume(generation: UInt64) async -> Bool
+}
+
+extension SystemSpeechSynthesizing {
+    public var playbackCapabilities: SpeechPlaybackCapabilities { .unavailable }
+    public func pause(generation: UInt64) async -> Bool { false }
+    public func resume(generation: UInt64) async -> Bool { false }
 }
 
 /// Generated-audio sink. `play()` returning `false` is a failure.
@@ -39,6 +51,15 @@ public protocol SpeechAudioPlaying: AnyObject, Sendable {
     func detach()
     func play() -> Bool
     func stop()
+    var playbackCapabilities: SpeechPlaybackCapabilities { get }
+    func pause() -> Bool
+    func resume() -> Bool
+}
+
+extension SpeechAudioPlaying {
+    public var playbackCapabilities: SpeechPlaybackCapabilities { .unavailable }
+    public func pause() -> Bool { false }
+    public func resume() -> Bool { false }
 }
 
 public typealias SpeechAudioPlayerFactory = @Sendable (Data) throws -> any SpeechAudioPlaying
@@ -56,6 +77,13 @@ protocol SpeechWorkScheduling: AnyObject, Sendable {
 protocol SpeechSynthesizerEngine: AnyObject, Sendable {
     func speak(_ utterance: AVSpeechUtterance)
     func stopSpeaking()
+    func pauseSpeaking() -> Bool
+    func continueSpeaking() -> Bool
+}
+
+extension SpeechSynthesizerEngine {
+    func pauseSpeaking() -> Bool { false }
+    func continueSpeaking() -> Bool { false }
 }
 
 private struct UncheckedSpeechUtterance: @unchecked Sendable {
@@ -85,6 +113,9 @@ final class AVFoundationSpeechSynthesizerEngine: SpeechSynthesizerEngine, @unche
     func stopSpeaking() {
         synthesizer.stopSpeaking(at: .immediate)
     }
+
+    func pauseSpeaking() -> Bool { synthesizer.pauseSpeaking(at: .immediate) }
+    func continueSpeaking() -> Bool { synthesizer.continueSpeaking() }
 }
 
 /// Production live-speech sink. Cancellation is recorded under the lock before
@@ -168,18 +199,48 @@ final class AVSpeechSynthesizerSink: NSObject, SystemSpeechSynthesizing, AVSpeec
             guard let self else { return }
             self.lock.lock()
             let current = self.speakingGeneration
-            let startedStillTracked = self.pending.values.contains {
-                $0.generation == generation && $0.cancelled
-            }
             let stillLive = self.pending.values.contains {
                 $0.generation == generation && !$0.cancelled
             }
             self.lock.unlock()
             guard !stillLive else { return }
-            if current == nil || current == generation || startedStillTracked {
+            if current == nil || current == generation {
                 self.engine.stopSpeaking()
             }
         }
+    }
+
+    var playbackCapabilities: SpeechPlaybackCapabilities { .systemSpeech }
+
+    func pause(generation: UInt64) async -> Bool { await control(generation: generation, pausing: true) }
+    func resume(generation: UInt64) async -> Bool { await control(generation: generation, pausing: false) }
+
+    private func control(generation: UInt64, pausing: Bool) async -> Bool {
+        await withCheckedContinuation { continuation in
+            scheduler.enqueue { [weak self] in
+                guard let self else { continuation.resume(returning: false); return }
+                let live = self.lock.withLock {
+                    self.speakingGeneration == generation && self.pending.values.contains {
+                        $0.generation == generation && !$0.cancelled
+                    }
+                }
+                guard live else { continuation.resume(returning: false); return }
+                continuation.resume(returning: pausing ? self.engine.pauseSpeaking() : self.engine.continueSpeaking())
+            }
+        }
+    }
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didPause utterance: AVSpeechUtterance) {
+        handleEngineEvent(.didPause, identifier: ObjectIdentifier(utterance))
+    }
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didContinue utterance: AVSpeechUtterance) {
+        handleEngineEvent(.didContinue, identifier: ObjectIdentifier(utterance))
+    }
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, willSpeakRangeOfSpeechString characterRange: NSRange, utterance: AVSpeechUtterance) {
+        handleEngineEvent(.willSpeakRange(SpeechUTF16Range(location: characterRange.location, length: characterRange.length)),
+                          identifier: ObjectIdentifier(utterance))
     }
 
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) {
@@ -234,6 +295,13 @@ protocol AudioPlayerEngine: AnyObject, Sendable {
     func prepareToPlay()
     func play() -> Bool
     func stop()
+    func pause() -> Bool
+    func resume() -> Bool
+}
+
+extension AudioPlayerEngine {
+    func pause() -> Bool { false }
+    func resume() -> Bool { false }
 }
 
 final class MainQueueAudioPlayerScheduler: AudioPlayerScheduling, @unchecked Sendable {
@@ -315,6 +383,13 @@ final class AVFoundationAudioPlayerEngine: AudioPlayerEngine, @unchecked Sendabl
     func stop() {
         player.stop()
     }
+
+    func pause() -> Bool {
+        guard player.isPlaying else { return false }
+        player.pause()
+        return true
+    }
+    func resume() -> Bool { player.play() }
 }
 
 /// Generated-audio sink. Nonisolated and thread-safe: callers may use it from
@@ -358,6 +433,11 @@ public final class AVAudioPlayerSink: SpeechAudioPlaying, @unchecked Sendable {
             self.engine.setEventHandler(nil)
         }
     }
+
+    public var playbackCapabilities: SpeechPlaybackCapabilities { .generatedAudio }
+
+    public func pause() -> Bool { scheduler.sync { self.engine.pause() } }
+    public func resume() -> Bool { scheduler.sync { self.engine.resume() } }
 
     public func play() -> Bool {
         scheduler.sync {
