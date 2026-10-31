@@ -49,7 +49,7 @@
 - `VoxEndpoint.runtime(_:authToken:allowTCP:tcpHost:)` requires allowTCP=true for TCP metadata; direct `.tcp(host:port:authToken:)` is explicit opt-in, unencrypted trusted-loopback use.
 - Typed `startPCMStream(modelId:)`, `appendPCMStream(sessionId:sequence:samples:)`, `finishPCMStream(sessionId:)`, `cancelPCMStream(sessionId:)`, `nativeStreamingStatus()`; shared DTOs re-exported from VoxCore.
 - Generic Sendable Codable JSONValue from listModels/listCatalog/installModel/preloadModel/transcribeFile; `call(_:params:timeout:onProgress:)` exposes other existing routes, overrides clientId with owned identity.
-- Progress VoxRPCProgress callback must return promptly; UI work goes to MainActor. Install timeout 1800 s; preload/file 300 s; other calls 30 s.
+- Progress VoxRPCProgress callback must return promptly; UI work goes to MainActor. Install timeout 1800 s; preload/file default 300 s; preloadModel(_:timeout:onProgress:) permits an explicit cold-readiness budget, e.g. 600 s; other calls 30 s.
 - One typed append/finish in flight per session; 64 pending RPC limit; 16 MiB messages/32 MiB Unix queued output. Cancel remains callable during append/finish.
 - Request task cancellation/timeout closes connection and fails all pending calls, never retries uncertain work; not a server download-cancel capability. Explicit reconnect starts a new session.
 - No new capability negotiation, VAD, confirmed boundaries, hints, model delete/download cancellation, language field, or streaming diarization. File annotation requires a backend; one-shot generate has disconnect cancellation, not a per-request cancel RPC.
@@ -67,3 +67,5 @@
 
 - PrivateRuntimeConfiguration.resolve parses --private / VOX_SOCKET_PATH; default socket VOX_HOME/voxd.sock, system CSPRNG 32-byte token, optional validated explicit auth override; invalid/empty explicit config and --port conflict fail. Generated secrets never enter process environment or logs; client incomplete-env-pair rules stay strict.
 - Private publication checks prior owner PID before replacing legacy 0644 metadata: live PID blocks startup and rolls back listener; only a stale same-user record can upgrade to 0600 capability. Malformed/unsafe metadata fails. Never hand-write a token/chmod an active legacy record as a workaround. Operator stops/reconfigures the existing host deliberately; isolated tests use their own VOX_HOME/runtime path.
+
+- Native Parakeet batch words now group SentencePiece/whitespace-delimited pieces, punctuation attached. Older revisions returned BPE pieces. Start/end=min/max contributing token intervals, confidence=min piece score; 80 ms decoder-frame estimates, not forced alignment/calibrated word posterior. Multiword pieces share source interval; missing vocab skipped, malformed alignment arrays return no timings. Grouping runs after long-file chunk merge.

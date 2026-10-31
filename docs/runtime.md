@@ -40,6 +40,20 @@ operator/user request to acquire the model.
 
 `transcribe.file` is best for benchmarks because it takes mic capture out of the measurement. Returns transcript text, word-level timestamps, `modelId`, elapsed time, and stage metrics.
 
+Native Parakeet batch `words` are SentencePiece/whitespace-delimited word groups,
+with punctuation attached as it appears in the decoded text. Older revisions
+incorrectly returned individual BPE pieces in this array. A group's start/end
+cover the minimum start and maximum end of its contributing model-token
+intervals; `confidence` is the minimum piece confidence, not a calibrated word
+posterior. Timings remain TDT decoder-frame estimates (80 ms frames), not forced
+alignment or exact acoustic boundaries. Multiword pieces share their source
+interval rather than receiving invented subdivisions. Language-specific
+linguistic segmentation is not inferred beyond the model's whitespace markers.
+Missing vocabulary entries do not invent labels; incomplete alignment arrays
+return no timings rather than silently losing the tail or fabricating data.
+The same grouping runs after long-file chunk merging.
+
+
 ## File Annotation
 
 `annotate.file` is the file-first speaker annotation route. It accepts an audio path plus optional transcript text and word timings, and returns speaker segments, speaker-attributed words, and annotation metrics.
@@ -235,7 +249,7 @@ transport. Use `connectDiscovered()` for the owner-only host capability describe
 below, or pass an explicit endpoint.
 
 `listModels()`, `listCatalog()`, `installModel(_:onProgress:)`,
-`preloadModel(_:onProgress:)`, and `transcribeFile(path:modelId:)` return
+`preloadModel(_:timeout:onProgress:)`, and `transcribeFile(path:modelId:)` return
 `JSONValue`, a Sendable Codable value. This preserves provider metrics and
 catalog fields without a parallel schema. `nativeStreamingStatus()` returns
 `NativeStreamingStatus` from `VoxCore`. PCM methods return typed
@@ -245,9 +259,14 @@ catalog fields without a parallel schema. `nativeStreamingStatus()` returns
 Use `call(_:params:timeout:onProgress:)` for other existing routes, including
 warmup, annotation and TTS. It always supplies the client's stable `clientId`.
 Progress callbacks receive `VoxRPCProgress` and run on the client actor; dispatch
-UI changes to the main actor. Install has a 30-minute request budget, preload and
-file transcription have 5-minute budgets, and other methods default to 30 seconds.
-At most 64 RPC requests can be pending. PCM append and finish reject overlapping
+UI changes to the main actor. Install defaults to a 30-minute request budget;
+preload and file transcription default to 5 minutes, and other methods default
+to 30 seconds.
+Preload callers can select a different wait budget, for example
+`preloadModel("parakeet:v3", timeout: .seconds(600))`. This changes the caller's
+wait deadline, not residency or server compilation cancellation. Cold readiness
+must be visible in app UI; do not hide it by disabling idle unload or starting
+capture before readiness. At most 64 RPC requests can be pending. PCM append and finish reject overlapping
 operations for the same session; await each acknowledgement.
 
 A cancelled or timed-out request closes the connection and fails all pending

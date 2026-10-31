@@ -52,3 +52,5 @@
 - ElevenLabs uses an ephemeral no-cache/cookie/credential-storage session by default and no-store requests. HTTP errors return status only, no vendor body; non-WAV success bodies rejected. Default output_format=wav_44100, not invalid wav_44100_128; account tier gates apply, no automatic fallback. Inventories reflect configured keys, not borrowed keys. Browser HTTP voice-list route does not accept credentials in URLs.
 
 - Scoped voice credentials forwarding is verified for bundled voxttsd; third-party external adapters must honor that protocol themselves. Lend only the selected provider key, not a whole credential store.
+
+- Parakeet batch words are grouped SentencePiece/whitespace spans after chunk merge, punctuation attached, min/max token bounds and min piece confidence. 80 ms TDT estimates, not forced alignment/calibrated word posterior; no fake missing-vocab labels or truncated alignment arrays.

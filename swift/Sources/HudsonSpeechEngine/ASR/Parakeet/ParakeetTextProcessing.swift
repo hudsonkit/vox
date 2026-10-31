@@ -18,38 +18,53 @@ enum ParakeetTextProcessing {
         tokenDurations: [Int],
         vocabulary: [Int: String]
     ) -> [WordTiming] {
-        guard !tokenIds.isEmpty,
-              !timestamps.isEmpty,
-              tokenIds.count == timestamps.count,
-              confidences.count == tokenIds.count else {
+        guard !tokenIds.isEmpty else { return [] }
+        guard tokenIds.count == timestamps.count, confidences.count == tokenIds.count,
+              tokenDurations.isEmpty || tokenDurations.count == tokenIds.count,
+              timestamps.allSatisfy({ $0 >= 0 }), tokenDurations.allSatisfy({ $0 >= 0 }) else {
+            VoxLog.engine.warning("parakeet.word_timings alignment_unavailable inputTokens=\(tokenIds.count) timestamps=\(timestamps.count) confidences=\(confidences.count) durations=\(tokenDurations.count)")
             return []
         }
 
-        let combined = zip(
-            zip(zip(tokenIds, timestamps), confidences),
-            tokenDurations.isEmpty ? Array(repeating: 0, count: tokenIds.count) : tokenDurations
-        ).map { (tokenId: $0.0.0.0, timestamp: $0.0.0.1, confidence: $0.0.1, duration: $0.1) }
-            .sorted { $0.timestamp < $1.timestamp }
-
-        return combined.compactMap { item in
-            let rawToken = vocabulary[item.tokenId] ?? "token_\(item.tokenId)"
-            let normalized = rawToken
-                .replacingOccurrences(of: "▁", with: " ")
-                .trimmingCharacters(in: .whitespaces)
-            guard !normalized.isEmpty else { return nil }
-
-            let startTime = Double(item.timestamp) * ParakeetConstants.secondsPerEncoderFrame
-            let durationInSeconds = item.duration > 0
-                ? Double(item.duration) * ParakeetConstants.secondsPerEncoderFrame
-                : ParakeetConstants.secondsPerEncoderFrame
-            let endTime = max(startTime + durationInSeconds, startTime + 0.001)
-
-            return WordTiming(
-                word: normalized,
-                start: startTime,
-                end: endTime,
-                confidence: item.confidence
-            )
+        // Decoder symbols can share an emission frame. Keep their original order
+        // within that frame so punctuation and subword pieces cannot be permuted.
+        let ordered = tokenIds.indices.sorted {
+            timestamps[$0] == timestamps[$1] ? $0 < $1 : timestamps[$0] < timestamps[$1]
         }
+        var words: [WordTiming] = []
+        var word = ""
+        var start = 0.0
+        var end = 0.0
+        var confidence: Float = 1
+        func commit() {
+            guard !word.isEmpty else { return }
+            words.append(WordTiming(word: word, start: start, end: end, confidence: confidence))
+            word = ""
+        }
+
+        for index in ordered {
+            // Match text decoding: absent vocabulary entries do not invent token_N words.
+            guard let piece = vocabulary[tokenIds[index]], !piece.isEmpty else { continue }
+            let tokenStart = Double(timestamps[index]) * ParakeetConstants.secondsPerEncoderFrame
+            let frames = tokenDurations.isEmpty ? 1 : max(1, tokenDurations[index])
+            let tokenEnd = tokenStart + Double(frames) * ParakeetConstants.secondsPerEncoderFrame
+            for character in piece.replacingOccurrences(of: "▁", with: " ") {
+                if character.isWhitespace { commit(); continue }
+                if word.isEmpty {
+                    start = tokenStart
+                    end = tokenEnd
+                    confidence = confidences[index]
+                } else {
+                    start = min(start, tokenStart)
+                    end = max(end, tokenEnd)
+                    confidence = min(confidence, confidences[index])
+                }
+                word.append(character)
+            }
+        }
+        commit()
+        let decodedWords = convertTokensToText(tokenIds, vocabulary: vocabulary).split(whereSeparator: \.isWhitespace).count
+        VoxLog.engine.debug("parakeet.word_timings unit=word inputTokens=\(tokenIds.count) decodedWhitespaceWords=\(decodedWords) outputWords=\(words.count)")
+        return words
     }
 }

@@ -151,6 +151,20 @@ struct VoxClientTests {
         await client.disconnect()
     }
 
+    @Test func preloadUsesTheCallersExplicitColdReadinessBudget() async throws {
+        let f = try Fixture()
+        f.bridge.handleStreaming("models.preload") { _, progress, _ in
+            progress("models.progress", ["stage": "priming"])
+            // Deliberately stay pending: a caller-selected budget must replace the default.
+        }
+        let client = VoxDaemonClient(clientId: "talkie")
+        try await client.connect(f.endpoint)
+        await #expect(throws: VoxClientError.timeout) {
+            try await client.preloadModel("parakeet:v3", timeout: .milliseconds(150))
+        }
+        #expect(await client.isConnected == false)
+    }
+
     @Test func timeoutCancellationAndDisconnectDoNotRetry() async throws {
         let f = try Fixture(), calls = Recorder(), disconnects = Recorder()
         f.bridge.handle("hang") { _, _ in calls.append("request") }

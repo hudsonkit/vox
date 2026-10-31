@@ -65,11 +65,37 @@ CI exposed a separate existing issue: external-provider stdout/stderr readers us
 
 ## Talkie contract
 
-Prefer one shared `voxd` private Unix host (`VOX_SOCKET_PATH` + `VOX_AUTH_TOKEN`), not an embedded copy in every app. Explicitly call `models.install` / `models.preload` for `nemotron:unified-560ms`. Then use `transcribe.stream.start`, `append`, `finish`, and `cancel` on the same authenticated connection and `clientId`.
+Prefer one shared `voxd --private` Unix host, not an embedded copy in every app. It generates and publishes an owner-only capability; explicit host endpoint/token overrides remain available. Explicitly call `models.install` / `models.preload` for `nemotron:unified-560ms`. Then use `transcribe.stream.start`, `append`, `finish`, and `cancel` on the same authenticated connection and `clientId`.
 
 Append 1–16000 mono 16 kHz float32le samples as base64, with acknowledged sequence numbers beginning at zero. Results contain cumulative `text`, `words` (`word`, `start`, `end`, `confidence`), and `endOfUtterance`. Word times are approximate RNNT emission frames. Nemotron endpointing is a 1120 ms RNNT blank-duration rule, explicitly marked `endpointSource: "blank-duration"`, not a trained EOU head. Endpoints do not auto-stop. Finish flushes; cancel discards. Disconnect cancels ownership. Sessions are bounded to 120 s.
 
 Embedded single-process callers can use `NativeStreamingASR.shared` from `VoxEngine`. Companion preload currently uses English-US; embedded preload supports explicit language selection. See [the runtime contract](../runtime.md#native-pcm-streaming).
+
+## Follow-up timing correction and application evidence
+
+The initial Parakeet batch adapter emitted BPE timing pieces in its public
+`words` array. The current adapter groups SentencePiece/whitespace-delimited
+words after chunk merge, retaining min/max token intervals and minimum piece
+confidence. These remain 80 ms TDT frame estimates, not forced alignment.
+A regression fixture reproduces the reported 83-piece/41-word mismatch and now
+returns 41 word groups. The text and WER calculations above did not use the
+piece count, so those historical results are unchanged. This correction does
+not constitute a new model performance run or a rerun of Talkie's recording.
+
+The [Talkie integration lane](https://github.com/arach/talkie-source/pull/1)
+separately reported a development Agent in explicit DEBUG reduced-boot mode,
+without normal launchd/XPC ownership, hotkeys or microphone capture, against
+`voxd` revision `a7aebc1`. For an 18.868 s synthetic Parakeet v3 file it reported
+487 ms warm end-to-end latency; Agent physical footprint 33.1 MiB after warmup
+and after batch; daemon 106.3 MiB warm, 113.3 MiB after batch, 117.8 MiB peak.
+Cold live-to-batch switch/install/load/long-form prime took **221.45 s** on that
+working M1 host: approximately 14 s download, 70 s load/plan and 137 s prime.
+These are peer-reported **MiB** values and a different debug application harness,
+not the decimal-MB release comparison table above or installed full-Agent
+acceptance. Keep cold readiness visible; warm throughput does not describe it.
+The Swift companion preload helper accepts an explicit wait budget without
+changing idle-unload policy. Final client/daemon and full Agent/capture/GUI
+verification remain Talkie migration gates.
 
 ## Reproduce and remaining validation
 

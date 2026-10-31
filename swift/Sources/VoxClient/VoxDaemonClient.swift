@@ -145,8 +145,10 @@ public actor VoxDaemonClient {
     public func installModel(_ modelId: String, onProgress: (@Sendable (VoxRPCProgress) -> Void)? = nil) async throws -> JSONValue {
         try await call("models.install", params: ["modelId": .string(modelId)], timeout: .seconds(1800), onProgress: onProgress)
     }
-    public func preloadModel(_ modelId: String, onProgress: (@Sendable (VoxRPCProgress) -> Void)? = nil) async throws -> JSONValue {
-        try await call("models.preload", params: ["modelId": .string(modelId)], timeout: .seconds(300), onProgress: onProgress)
+    /// Wait budget only: does not pin residency or cancel a shared server compile on expiry.
+    public func preloadModel(_ modelId: String, timeout: Duration = .seconds(300),
+                             onProgress: (@Sendable (VoxRPCProgress) -> Void)? = nil) async throws -> JSONValue {
+        try await call("models.preload", params: ["modelId": .string(modelId)], timeout: timeout, onProgress: onProgress)
     }
     public func nativeStreamingStatus() async throws -> NativeStreamingStatus {
         try await call("transcribe.stream.status").decode()
