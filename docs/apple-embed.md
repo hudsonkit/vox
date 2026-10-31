@@ -302,6 +302,45 @@ See the public-only [readout consumer](../examples/apple-readout/README.md), com
 for iOS Simulator in CI. No audible device run or physical-iOS behavior is implied
 by its synthetic tests and compilation. The [readout verification report](./reports/apple-readout-controls-2026-10-30.md) records coverage and limits.
 
+### Per-request output pitch and volume
+
+Keep generation parameters in `SynthesisRequest` and local playback parameters in
+`SpeechOutputOptions`. This prevents unsupported pitch from being silently passed
+to a cloud generation provider:
+
+```swift
+let identity = try await output.start(
+    SynthesisRequest(text: originalText, modelId: TTSDefaults.localModelId, speed: 1.2),
+    options: SpeechOutputOptions(pitchMultiplier: 0.6, volume: 0.4)
+)
+// Or try await output.speak(request, options: options) when no token is needed.
+```
+
+`pitchMultiplier` accepts finite **0.5...2.0**; `volume` accepts finite **0...1**.
+Both are optional Doubles; nil leaves the platform default. Values are validated
+before replacing current playback, not silently clamped. Invalid values throw
+`invalidPitchMultiplier` / `invalidVolume` synchronously from `start` or the explicit
+options `speak` overload. The older no-options `speak(_:)` remains unchanged.
+
+Events/status report the requested `options` and actual `canSetPitch` / `canSetVolume`
+capabilities. Built-in live system speech supports both, setting the utterance
+properties **before enqueue**. Pause/resume and seek-as-replacement preserve them.
+A subsequent request with nil options gets fresh platform defaults, not the previous
+request's settings. Explicit defaults such as pitch=1 still require sink support.
+
+Built-in generated audio supports local player volume, not pitch. Pitch requests
+fail before synthesis. Volume is checked/applied to the actual generated-audio
+sink before play. With custom player factories this check necessarily occurs after
+generation; unsupported or declined volume fails without playing. Existing custom
+sinks default both capabilities to false; a player opting into volume must implement
+`setVolume(_:) -> Bool`. A false return rejects the option.
+
+Unsupported options discovered during asynchronous route/player resolution emit an
+identity-bearing terminal `failed` event (`unsupportedPitch` / `unsupportedVolume`),
+not a successful request with ignored controls. Observe terminal events, not only
+the initial `start` return. No generated-audio pitch shift, word alignment or
+provider synthesis pitch/volume parameter is fabricated by this output API.
+
 ## Warm-up
 
 Warm-up must remain explicit.

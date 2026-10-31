@@ -11,8 +11,10 @@ public actor ReadoutSurface {
         output = AppleSpeechOutputController(onEvent: onEvent)
     }
 
-    public func start(text: String, voiceId: String? = nil) async throws -> SpeechOutputIdentity {
-        try await output.start(SynthesisRequest(text: text, modelId: TTSDefaults.localModelId, voiceId: voiceId))
+    public func start(text: String, voiceId: String? = nil, speed: Double? = nil,
+                      pitchMultiplier: Double? = nil, volume: Double? = nil) async throws -> SpeechOutputIdentity {
+        try await output.start(SynthesisRequest(text: text, modelId: TTSDefaults.localModelId, voiceId: voiceId, speed: speed),
+                               options: SpeechOutputOptions(pitchMultiplier: pitchMultiplier, volume: volume))
     }
 
     public func pause(_ identity: SpeechOutputIdentity) async throws -> Bool { try await output.pause(identity) }

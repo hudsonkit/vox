@@ -37,6 +37,33 @@ require playing/resumed for pause, paused for resume, and no pending system cont
 Status/capabilities can be unavailable while a new request resolves. Pause never
 calls stop or re-synthesizes. Generated audio retains its player and position.
 
+## Per-request native pitch and volume
+
+`SpeechOutputOptions(pitchMultiplier:volume:)` is separate from generation-only
+`SynthesisRequest`. Pass it to `start(request,options:)` or the throwing explicit
+options `speak` overload. Pitch accepts finite 0.5...2.0 and volume finite 0...1,
+matching the SDK utterance property bounds. Nil means fresh platform defaults.
+Invalid options throw before replacing the active request. They are not clamped.
+
+Live system speech applies both to the actual utterance before enqueue. Events
+and status expose requested options and actual `canSetPitch` / `canSetVolume`.
+Seek preserves options; pause/resume retains the utterance/player; new requests
+without options do not inherit prior settings. Even an explicit neutral value
+requires support, rather than silently pretending a custom sink applied it.
+
+Generated audio cannot apply pitch and rejects it before synthesis. The built-in
+player supports genuine local volume. A custom player's capability/setVolume check
+occurs after generation but before play; missing support or false rejects playback.
+Asynchronously discovered unsupported options produce identity-bearing terminal
+failed events, not ignored parameters. Existing custom sinks default unsupported.
+No provider generation options or pitch-shifted generated audio are invented.
+
+Four additional injection tests cover actual utterance pitch/volume values,
+seek/default reset, boundary values, NaN/infinity/out-of-range rejection without
+cancelling active playback, unsupported native sinks, pre-generation pitch rejection,
+and unsupported/declined player volume. The production audio sink's injected engine
+also verifies volume forwarding and invalid-value rejection before platform calls.
+
 ## UTF-16 and replacement ownership
 
 Seek uses an offset into the exact **original** request, not a normalized copy,
@@ -83,11 +110,11 @@ models, downloads or ANE hardware. Parakeet v3 remains the file policy.
 
 ## Verification
 
-- **285 Swift Testing cases** plus XCTest suites pass; 11 new tests cover readout
+- **289 Swift Testing cases** plus XCTest suites pass; 15 new tests cover readout
   controls/sink scheduling and production streaming availability.
-- **46 strict cooperative focused tests** pass. Existing source-compatible injected
+- **50 strict cooperative focused tests** pass. Existing source-compatible injected
   sinks and enqueue-window cancellation tests continue to pass.
-- New public-only `examples/apple-readout` imports `VoxCore`, `VoxEngine` and
+- New public-only Swift 5-language-mode `examples/apple-readout` imports `VoxCore`, `VoxEngine` and
   `VoxAppleSpeech`, owns no direct Speech/AVSpeechSynthesizer and compiles for ARM64
   iOS Simulator. It exercises exported start/control/status/range contract types
   and production streaming inventory at compile time. It is a CI step.

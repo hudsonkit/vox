@@ -54,12 +54,15 @@ public protocol SpeechAudioPlaying: AnyObject, Sendable {
     var playbackCapabilities: SpeechPlaybackCapabilities { get }
     func pause() -> Bool
     func resume() -> Bool
+    /// Must apply before play; false rejects the option rather than ignoring it.
+    func setVolume(_ volume: Float) -> Bool
 }
 
 extension SpeechAudioPlaying {
     public var playbackCapabilities: SpeechPlaybackCapabilities { .unavailable }
     public func pause() -> Bool { false }
     public func resume() -> Bool { false }
+    public func setVolume(_ volume: Float) -> Bool { false }
 }
 
 public typealias SpeechAudioPlayerFactory = @Sendable (Data) throws -> any SpeechAudioPlaying
@@ -297,11 +300,13 @@ protocol AudioPlayerEngine: AnyObject, Sendable {
     func stop()
     func pause() -> Bool
     func resume() -> Bool
+    func setVolume(_ volume: Float) -> Bool
 }
 
 extension AudioPlayerEngine {
     func pause() -> Bool { false }
     func resume() -> Bool { false }
+    func setVolume(_ volume: Float) -> Bool { false }
 }
 
 final class MainQueueAudioPlayerScheduler: AudioPlayerScheduling, @unchecked Sendable {
@@ -390,6 +395,11 @@ final class AVFoundationAudioPlayerEngine: AudioPlayerEngine, @unchecked Sendabl
         return true
     }
     func resume() -> Bool { player.play() }
+    func setVolume(_ volume: Float) -> Bool {
+        guard volume.isFinite, (0...1).contains(volume) else { return false }
+        player.volume = volume
+        return true
+    }
 }
 
 /// Generated-audio sink. Nonisolated and thread-safe: callers may use it from
@@ -438,6 +448,10 @@ public final class AVAudioPlayerSink: SpeechAudioPlaying, @unchecked Sendable {
 
     public func pause() -> Bool { scheduler.sync { self.engine.pause() } }
     public func resume() -> Bool { scheduler.sync { self.engine.resume() } }
+    public func setVolume(_ volume: Float) -> Bool {
+        guard volume.isFinite, (0...1).contains(volume) else { return false }
+        return scheduler.sync { self.engine.setVolume(volume) }
+    }
 
     public func play() -> Bool {
         scheduler.sync {

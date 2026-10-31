@@ -1,10 +1,16 @@
 # Embedded Apple readout controls
 
-Public-only `VoxCore` + `VoxEngine` + `VoxAppleSpeech` consumer. The app owns one
+Public-only Swift 5-language-mode consumer of Swift 6 `VoxCore` + `VoxEngine` + `VoxAppleSpeech`. The app owns one
 `ReadoutSurface` per audible surface, not an `AVSpeechSynthesizer` or local daemon.
 Initialization and compilation do not start playback or download models.
 
 - `start` returns request/generation identity. Existing `speak(_:)` remains available.
+  Its optional pitch/volume parameters become per-request `SpeechOutputOptions`:
+  finite pitch 0.5...2.0 and volume 0...1, nil for platform defaults. Invalid values
+  throw before replacing playback. System speech supports both and preserves them
+  across seek/pause/resume. Generated audio supports player volume, not pitch.
+  Observe failed events for unsupported options after asynchronous resolution;
+  custom sinks never silently accept controls they cannot apply.
 - Wait for `playing`, then use identity-scoped `pause` / `resume`. A system control's
   true return means accepted; `paused` / `resumed` delegate events acknowledge it.
   False means the sink declined. `status()` and events expose actual capabilities.

@@ -7,6 +7,95 @@ import VoxEngine
 
 @Suite(.serialized, .timeLimit(.minutes(1)))
 struct ReadoutControlsTests {
+    @Test("Native pitch/volume apply before enqueue, survive seek and do not leak into another request")
+    func nativeOutputOptions() async throws {
+        let f = Fixture()
+        let options = SpeechOutputOptions(pitchMultiplier: 0.6, volume: 0.25)
+        let id = try await f.controller.start(f.request(), options: options)
+        try await f.playing(id)
+        #expect(f.sink.spoken.last?.pitch == Float(0.6))
+        #expect(f.sink.spoken.last?.volume == Float(0.25))
+        #expect(await f.controller.status()?.options == options)
+        #expect(f.events.values.allSatisfy { $0.options == options && $0.capabilities.canSetPitch && $0.capabilities.canSetVolume })
+        let next = try await f.controller.seek(id, toUTF16Offset: 6)
+        try await f.playing(next)
+        #expect(f.sink.spoken.last?.pitch == Float(0.6) && f.sink.spoken.last?.volume == Float(0.25))
+        #expect(await f.controller.status()?.options == options)
+        let plain = try await f.controller.start(f.request())
+        try await f.playing(plain)
+        #expect(f.sink.spoken.last?.pitch == 1 && f.sink.spoken.last?.volume == 1)
+        #expect(await f.controller.status()?.options == SpeechOutputOptions())
+        try await f.controller.stop(plain)
+    }
+
+    @Test("Output options reject nonfinite/out-of-range values before replacing active playback; boundaries are accepted")
+    func outputOptionValidation() async throws {
+        let f = Fixture()
+        var current = try await f.controller.start(f.request())
+        try await f.playing(current)
+        for pitch in [Double.nan, .infinity, -.infinity, 0.49, 2.01] {
+            await #expect(throws: SpeechOutputControlError.invalidPitchMultiplier) {
+                try await f.controller.start(f.request(), options: .init(pitchMultiplier: pitch))
+            }
+            #expect(await f.controller.status()?.identity == current)
+        }
+        for volume in [Double.nan, .infinity, -.infinity, -0.01, 1.01] {
+            await #expect(throws: SpeechOutputControlError.invalidVolume) {
+                try await f.controller.speak(f.request(), options: .init(volume: volume))
+            }
+            #expect(await f.controller.status()?.identity == current)
+        }
+        #expect(f.sink.spoken.count == 1)
+        for (pitch, volume) in [(0.5, 0.0), (2.0, 1.0), (1.6, 0.6)] {
+            current = try await f.controller.start(f.request(), options: .init(pitchMultiplier: pitch, volume: volume))
+            try await f.playing(current)
+            #expect(f.sink.spoken.last?.pitch == Float(pitch) && f.sink.spoken.last?.volume == Float(volume))
+        }
+        try await f.controller.stop(current)
+    }
+
+    @Test("Explicit unsupported native options fail rather than silently using platform defaults")
+    func unsupportedNativeOptions() async throws {
+        for (options, error) in [(SpeechOutputOptions(pitchMultiplier: 1), SpeechOutputControlError.unsupportedPitch),
+                                 (SpeechOutputOptions(volume: 1), SpeechOutputControlError.unsupportedVolume)] {
+            let f = Fixture(sink: ControlSynthesizer(capabilities: .unavailable))
+            let id = try await f.controller.start(f.request(), options: options)
+            try await f.events.wait(.failed, id)
+            #expect(f.sink.spoken.isEmpty)
+            #expect(f.events.values.last?.error == error.localizedDescription)
+            #expect(f.events.values.last?.options == options)
+            #expect(await f.controller.status() == nil)
+        }
+    }
+
+    @Test("Generated output supports real player volume but rejects pitch before generation and declined volume before play")
+    func generatedOutputOptions() async throws {
+        let provider = ReadoutProvider(), events = ControlEvents(), player = ControlPlayer()
+        let controller = AppleSpeechOutputController(engine: TTSEngineManager(provider: provider),
+            synthesizer: ControlSynthesizer(), playerFactory: { _ in player }, onEvent: events.append)
+        let request = SynthesisRequest(text: "Cloud bytes", modelId: "fixture")
+        let pitched = try await controller.start(request, options: .init(pitchMultiplier: 1.2))
+        try await events.wait(.failed, pitched)
+        #expect(events.values.last?.error == SpeechOutputControlError.unsupportedPitch.localizedDescription)
+        #expect(await provider.generations == 0 && player.counts[0] == 0)
+        let quieter = try await controller.start(request, options: .init(volume: 0.3))
+        try await events.wait(.playing, quieter)
+        #expect(player.volumes == [Float(0.3)])
+        #expect(await controller.status()?.capabilities.canSetVolume == true)
+        #expect(await controller.status()?.capabilities.canSetPitch == false)
+        try await controller.stop(quieter)
+        for advertised in [true, false] {
+            let rejectedEvents = ControlEvents(), rejected = ControlPlayer(supportsVolume: advertised, acceptsVolume: false)
+            let output = AppleSpeechOutputController(engine: TTSEngineManager(provider: provider),
+                synthesizer: ControlSynthesizer(), playerFactory: { _ in rejected }, onEvent: rejectedEvents.append)
+            let id = try await output.start(request, options: .init(volume: 0.4))
+            try await rejectedEvents.wait(.failed, id)
+            #expect(rejected.counts[0] == 0)
+            #expect(rejectedEvents.values.last?.error == SpeechOutputControlError.unsupportedVolume.localizedDescription)
+            #expect(rejected.volumes.count == (advertised ? 1 : 0))
+        }
+    }
+
     @Test("System pause and resume retain the same utterance and acknowledge delegate events")
     func genuinePauseResume() async throws {
         let f = Fixture()
@@ -215,7 +304,7 @@ private actor ControlGate {
     func release() { continuation?.resume(); continuation = nil }
 }
 private final class ControlSynthesizer: SystemSpeechSynthesizing, @unchecked Sendable {
-    struct Spoken { let text: String; let id: SpeechOutputIdentity }
+    struct Spoken { let text: String; let id: SpeechOutputIdentity; let pitch: Float; let volume: Float }
     let playbackCapabilities: SpeechPlaybackCapabilities
     private let lock = NSLock()
     private let accept: Bool
@@ -231,7 +320,7 @@ private final class ControlSynthesizer: SystemSpeechSynthesizing, @unchecked Sen
     }
     func setCallback(_ callback: @escaping @Sendable (SystemSpeechEvent) -> Void) { lock.withLock { self.callback = callback } }
     func speak(_ utterance: AVSpeechUtterance, generation: UInt64, requestId: String) {
-        lock.withLock { utterances.append(Spoken(text: utterance.speechString, id: .init(requestId: requestId, generation: generation))) }
+        lock.withLock { utterances.append(Spoken(text: utterance.speechString, id: .init(requestId: requestId, generation: generation), pitch: utterance.pitchMultiplier, volume: utterance.volume)) }
     }
     func stop(generation: UInt64) { lock.withLock { stopCalls.append(generation) } }
     func pause(generation: UInt64) async -> Bool {
@@ -247,9 +336,20 @@ private final class ControlSynthesizer: SystemSpeechSynthesizing, @unchecked Sen
 }
 
 private final class ControlPlayer: SpeechAudioPlaying, @unchecked Sendable {
-    let playbackCapabilities = SpeechPlaybackCapabilities.generatedAudio
+    let playbackCapabilities: SpeechPlaybackCapabilities
+    private let acceptsVolume: Bool
     private let lock = NSLock()
     private var stored = [0, 0, 0, 0]
+    private var volumeCalls: [Float] = []
+    var volumes: [Float] { lock.withLock { volumeCalls } }
+    init(supportsVolume: Bool = true, acceptsVolume: Bool = true) {
+        self.acceptsVolume = acceptsVolume
+        self.playbackCapabilities = SpeechPlaybackCapabilities(canPauseResume: true, canSetVolume: supportsVolume)
+    }
+    func setVolume(_ volume: Float) -> Bool {
+        lock.withLock { volumeCalls.append(volume) }
+        return acceptsVolume
+    }
     var counts: [Int] { lock.withLock { stored } }
     func attach(callback: @escaping @Sendable (SpeechAudioPlayerEvent) -> Void) {}
     func detach() {}
@@ -260,11 +360,13 @@ private final class ControlPlayer: SpeechAudioPlaying, @unchecked Sendable {
 }
 
 private actor ReadoutProvider: TTSProvider {
+    var generations = 0
     func models() -> [TTSModelInfo] { [.init(id: "fixture", name: "fixture", backend: "fixture", installed: true, preloaded: true, available: true)] }
     func voices(modelId: String?) -> [TTSVoiceInfo] { [] }
     func preload(modelId: String, voiceId: String?, progress: @escaping @Sendable (ModelProgress) -> Void) throws -> TTSModelInfo { throw ReadoutFailure.timeout }
     func synthesize(_ request: SynthesisRequest) -> SynthesisOutput {
-        .init(modelId: "fixture", voiceId: "voice", format: "wav", contentType: "audio/wav", audioData: Data([0]), elapsedMs: 0,
+        generations += 1
+        return .init(modelId: "fixture", voiceId: "voice", format: "wav", contentType: "audio/wav", audioData: Data([0]), elapsedMs: 0,
               metrics: .init(traceId: "fixture", characterCount: request.text.count, audioDurationMs: 1, outputBytes: 1,
                              wasPreloaded: true, modelCheckMs: 0, modelLoadMs: 0, voiceResolveMs: 0, synthesisMs: 0, totalMs: 0))
     }

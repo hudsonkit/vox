@@ -10,5 +10,5 @@ let package = Package(
         .product(name: "VoxCore", package: "Vox"),
         .product(name: "VoxEngine", package: "Vox"),
         .product(name: "VoxAppleSpeech", package: "Vox"),
-    ])]
+    ], swiftSettings: [.swiftLanguageMode(.v5)])]
 )

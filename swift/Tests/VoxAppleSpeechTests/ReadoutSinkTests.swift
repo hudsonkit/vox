@@ -55,6 +55,9 @@ struct ReadoutSinkTests {
     func generatedControls() {
         let engine = ControlAudioEngine(), queue = InlineAudioQueue()
         let sink = AVAudioPlayerSink(engine: engine, scheduler: queue)
+        #expect(sink.setVolume(0.25))
+        for invalid: Float in [.nan, .infinity, -0.1, 1.1] { #expect(!sink.setVolume(invalid)) }
+        #expect(engine.volumes == [0.25])
         #expect(sink.play())
         #expect(sink.pause())
         #expect(sink.resume())
@@ -101,6 +104,8 @@ private final class InlineAudioQueue: AudioPlayerScheduling, @unchecked Sendable
 }
 private final class ControlAudioEngine: AudioPlayerEngine, @unchecked Sendable {
     var counts = [0, 0, 0, 0, 0]
+    var volumes: [Float] = []
+    func setVolume(_ volume: Float) -> Bool { volumes.append(volume); return true }
     func setEventHandler(_ handler: (@Sendable (SpeechAudioPlayerEvent) -> Void)?) {}
     func prepareToPlay() { counts[0] += 1 }
     func play() -> Bool { counts[1] += 1; return true }

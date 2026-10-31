@@ -94,6 +94,10 @@
 - `avspeech:system` uses live `AVSpeechSynthesizer.speak()`, never `write()`-then-play
 - generated-audio models play `SynthesisOutput.audioData` through an injectable player sink
 - audio-session configuration is injectable and off by default
+- Per-request local output: start(request,options:SpeechOutputOptions(pitchMultiplier:Double?,volume:Double?)) or throwing speak(request,options:). SynthesisRequest remains generation-only (speed unchanged).
+- Pitch finite 0.5...2.0; volume finite 0...1; nil=platform default. Invalid values throw before replacing current playback; no silent clamp. Explicit values require support, even 1.0.
+- Events/status expose requested options + actual canSetPitch/canSetVolume. System speech applies both before enqueue, preserves through seek/pause/resume, resets defaults on next request.
+- Generated audio: pitch unsupported before synthesis; real player volume applied before play. Custom player volume support is learned after generation. Unsupported/declined options emit terminal failed (unsupportedPitch/unsupportedVolume), never silently ignore. Custom sinks default false; volume-capable players must implement setVolume(_:) -> Bool.
 - new requests replace pending generation/playback
 - stop/cancel are idempotent and must cancel Task, player, and synthesizer during the enqueue window
 - events report resolving/generating, starting, playing, paused, resumed, wordRange, finished, cancelled, failed

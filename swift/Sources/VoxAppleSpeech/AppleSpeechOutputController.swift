@@ -53,21 +53,27 @@ public actor AppleSpeechOutputController {
 
     /// Start speaking. A new request replaces any pending generation or playback.
     public func speak(_ request: SynthesisRequest) {
-        _ = enqueue(request, startingAtUTF16Offset: 0)
+        _ = enqueue(request, options: SpeechOutputOptions(), startingAtUTF16Offset: 0)
     }
 
     /// Start with an identity for fenced controls. Text is never normalized.
     @discardableResult
-    public func start(_ request: SynthesisRequest) throws -> SpeechOutputIdentity {
+    public func start(_ request: SynthesisRequest, options: SpeechOutputOptions = SpeechOutputOptions()) throws -> SpeechOutputIdentity {
+        try options.validate() // synchronous, before replacing active playback
         guard !request.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw SpeechOutputError.missingText }
-        return enqueue(request, startingAtUTF16Offset: 0)
+        return enqueue(request, options: options, startingAtUTF16Offset: 0)
+    }
+
+    /// Explicit playback options are validated just like start; legacy speak stays unchanged.
+    public func speak(_ request: SynthesisRequest, options: SpeechOutputOptions) throws {
+        _ = try start(request, options: options)
     }
 
     public func status() -> SpeechOutputStatus? {
         guard let session = current else { return nil }
         return SpeechOutputStatus(identity: session.identity, phase: session.phase, capabilities: session.capabilities,
                                   startingAtUTF16Offset: session.startingAtUTF16Offset,
-                                  originalTextUTF16Length: session.originalTextUTF16Length)
+                                  originalTextUTF16Length: session.originalTextUTF16Length, options: session.options)
     }
 
     /// Replace speech with a suffix of the ORIGINAL request. This is not audio-time seek.
@@ -79,7 +85,7 @@ public actor AppleSpeechOutputController {
             throw SpeechOutputControlError.unsupported
         }
         try validateOffset(offset, in: session.request.text)
-        return enqueue(session.request, startingAtUTF16Offset: offset)
+        return enqueue(session.request, options: session.options, startingAtUTF16Offset: offset)
     }
 
     /// True pause/continue of the existing utterance/player, never stop/re-synthesis.
@@ -146,12 +152,12 @@ public actor AppleSpeechOutputController {
         }
     }
 
-    private func enqueue(_ request: SynthesisRequest, startingAtUTF16Offset offset: Int) -> SpeechOutputIdentity {
+    private func enqueue(_ request: SynthesisRequest, options: SpeechOutputOptions, startingAtUTF16Offset offset: Int) -> SpeechOutputIdentity {
         interruptCurrent(emitting: .cancelled)
 
         let generation = nextGeneration
         nextGeneration += 1
-        let session = Session(request: request, generation: generation, engine: engine, startingAtUTF16Offset: offset)
+        let session = Session(request: request, generation: generation, engine: engine, startingAtUTF16Offset: offset, options: options)
         current = session
         session.task = Task { [weak self] in
             do {
@@ -224,6 +230,12 @@ public actor AppleSpeechOutputController {
         )
         session.audioOutput = SpeechOutputCapabilities.audioOutput(for: delivery)
         session.capabilities = delivery == .liveSystem ? synthesizer.playbackCapabilities : .unavailable
+        if delivery == .liveSystem {
+            try session.options.requireSupport(session.capabilities)
+        } else if session.options.pitchMultiplier != nil {
+            // Never pay for generation when the output path cannot apply pitch.
+            throw SpeechOutputControlError.unsupportedPitch
+        }
     }
 
     private func speakLive(_ session: Session) async throws {
@@ -239,6 +251,8 @@ public actor AppleSpeechOutputController {
         let utterance = AVSpeechUtterance(string: session.spokenText)
         utterance.voice = voice
         utterance.prefersAssistiveTechnologySettings = false
+        if let pitch = session.options.pitchMultiplier { utterance.pitchMultiplier = Float(pitch) }
+        if let volume = session.options.volume { utterance.volume = Float(volume) }
         if let speed = session.request.speed {
             utterance.rate = SpeechOutputRate.map(
                 speed: speed,
@@ -278,7 +292,12 @@ public actor AppleSpeechOutputController {
         }
         session.player = player
         // Generated audio has no word-range evidence in this sink contract.
-        session.capabilities = SpeechPlaybackCapabilities(canPauseResume: player.playbackCapabilities.canPauseResume)
+        session.capabilities = SpeechPlaybackCapabilities(canPauseResume: player.playbackCapabilities.canPauseResume,
+                                                         canSetVolume: player.playbackCapabilities.canSetVolume)
+        try session.options.requireSupport(session.capabilities)
+        if let volume = session.options.volume, !player.setVolume(Float(volume)) {
+            throw SpeechOutputControlError.unsupportedVolume
+        }
         emit(.starting, for: session)
 
         guard isActive(session.generation) else {
@@ -391,7 +410,8 @@ public actor AppleSpeechOutputController {
             audioOutput: session.audioOutput,
             error: error,
             utf16Range: utf16Range,
-            capabilities: session.capabilities
+            capabilities: session.capabilities,
+            options: session.options
         )
         onEvent?(event)
     }
@@ -466,6 +486,7 @@ private final class Session: @unchecked Sendable {
     private let spokenUTF16: [UInt16]
     let originalTextUTF16Length: Int
     let request: SynthesisRequest
+    let options: SpeechOutputOptions
     let generation: UInt64
     let engine: TTSEngineManager
     private let lock = NSLock()
@@ -500,7 +521,8 @@ private final class Session: @unchecked Sendable {
         }
     }
 
-    init(request: SynthesisRequest, generation: UInt64, engine: TTSEngineManager, startingAtUTF16Offset: Int) {
+    init(request: SynthesisRequest, generation: UInt64, engine: TTSEngineManager, startingAtUTF16Offset: Int, options: SpeechOutputOptions) {
+        self.options = options
         self.startingAtUTF16Offset = startingAtUTF16Offset
         let spokenText = String(request.text[String.Index(utf16Offset: startingAtUTF16Offset, in: request.text)...])
         self.spokenText = spokenText
