@@ -1,0 +1,50 @@
+name: AnnotationSandbox
+options:
+  deploymentTarget:
+    iOS: "17.0"
+packages:
+  Vox:
+    path: ../..
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    GENERATE_INFOPLIST_FILE: YES
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGNING_ALLOWED: YES
+    TARGETED_DEVICE_FAMILY: "1,2"
+targets:
+  AnnotationSandboxHost:
+    type: application
+    platform: iOS
+    sources:
+      - path: Host
+        excludes: [Info.plist]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: cc.voxd.annotation-sandbox-host
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: Host/Info.plist
+  AnnotationSandboxTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [Tests, Generated]
+    dependencies:
+      - target: AnnotationSandboxHost
+      - package: Vox
+        product: VoxCore
+      - package: Vox
+        product: VoxEngine
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: cc.voxd.annotation-sandbox-tests
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/AnnotationSandboxHost.app/AnnotationSandboxHost
+        BUNDLE_LOADER: $(TEST_HOST)
+schemes:
+  AnnotationSandbox:
+    build:
+      targets:
+        AnnotationSandboxHost: all
+        AnnotationSandboxTests: [test]
+    test:
+      targets: [AnnotationSandboxTests]
+      gatherCoverageData: false

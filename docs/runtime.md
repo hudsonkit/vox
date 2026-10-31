@@ -131,7 +131,11 @@ exposes `listAnnotationModels()` and `annotateFile(path, options)` with an expli
   than inventing zero or using the last word's end.
 - Vox limits input to 2,000,000,000 bytes and two active annotation requests. An
   additional request errors busy. Upload preparation copies in 64 KiB chunks to an
-  owner-only temporary file, removed on completion/error/cancellation. No upload
+  owner-only temporary file. Annotation opens the OS-provided temporary-directory
+  grant directly, then creates only its own random 0700 leaf and exclusive 0600
+  payload, with descriptor-relative cleanup on completion/error/cancellation.
+  It does not walk/create/chmod ancestors from filesystem root. The daemon's
+  stricter capability-path helper and privacy checks are unchanged. No upload
   or response cache is kept. Successful performance samples contain routing and
   stage metrics, not keys, media, transcript text or vendor responses.
 - HTTP responses are bounded to 4 MiB and encoded results to 8 MiB. Excess fails
