@@ -76,10 +76,12 @@ extension CoreMLPlacement {
       let config = MLModelConfiguration()
       config.computeUnits = .cpuAndNeuralEngine
       var model: MLModel? = try await ASRLoadStage(modelId: modelId, component: "encoder", phase: "model-load", attempt: attempt).measureAsync {
-        try await MLModel.load(contentsOf: url, configuration: config)
+        try NativePreparationResources.check(modelId: modelId, phase: "encoder-model-load")
+        return try await MLModel.load(contentsOf: url, configuration: config)
       }
       let placement = try await ASRLoadStage(modelId: modelId, component: "encoder", phase: "compute-plan", attempt: attempt).measureAsync {
-        try await read(url: url, configuration: config)
+        try NativePreparationResources.check(modelId: modelId, phase: "encoder-compute-plan")
+        return try await read(url: url, configuration: config)
       }
       VoxLog.engine.info(
         "CoreML placement model=\(modelId) attempt=\(attempt) ane=\(placement.neuralEngineOperations) cpu=\(placement.cpuOperations) gpu=\(placement.gpuOperations) unknown=\(placement.unknownOperations) aneCompute=\(placement.neuralEngineComputeOperations) cpuCompute=\(placement.cpuComputeOperations) aneCostFraction=\(placement.neuralEngineCostFraction ?? 0)"

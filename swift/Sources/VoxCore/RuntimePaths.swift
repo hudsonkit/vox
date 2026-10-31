@@ -93,6 +93,18 @@ public enum VoxDefaults {
 }
 
 public enum RuntimePaths {
+    /// Explicit shared model store, independent of runtime credentials, logs and history.
+    /// Callers selecting this root share installations, not loaded model instances.
+    public static func modelsDirectoryURL(environment: [String: String] = ProcessInfo.processInfo.environment) -> URL {
+        if let root = modelsDirectoryOverrideURL(environment: environment) { return root }
+        return voxHomeURL(environment: environment).appendingPathComponent("cache/models", isDirectory: true)
+    }
+
+    public static func modelsDirectoryOverrideURL(environment: [String: String] = ProcessInfo.processInfo.environment) -> URL? {
+        guard let path = environment["VOX_MODELS_PATH"], !path.isEmpty else { return nil }
+        return URL(fileURLWithPath: path, isDirectory: true)
+    }
+
     public static func voxHomeURL() -> URL { voxHomeURL(environment: ProcessInfo.processInfo.environment) }
 
     public static func voxHomeURL(environment: [String: String]) -> URL {

@@ -26,6 +26,10 @@ func footprintMB() -> Double {
 
   private static func run() async throws {
     let args = CommandLine.arguments
+    if args.count > 1 && args[1] == "lifecycle" {
+      try await NativeLifecycleBenchmark.run(arguments: args)
+      return
+    }
     guard args.count >= 4 else {
       print(
         "Usage: vox-asr-bench MODEL_ID MODEL_DIRECTORY AUDIO_16KHZ_MONO_WAV_OR_DIRECTORY [REFERENCE_TEXT_FILE] [--paced]"

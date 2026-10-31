@@ -20,6 +20,14 @@ jobs:
       - run: xcrun swift --version
       - name: Root package exports the lightweight Swift client
         run: xcrun swift build --target VoxClient --jobs 3
+      - name: Standalone Core ML cache probe compiles without loading models
+        run: |
+          xcrun swiftc -parse-as-library -swift-version 6 -O \
+            -target "$(uname -m)-apple-macos15.0" \
+            scripts/probe-coreml-cache.swift -o "$RUNNER_TEMP/vox-coreml-cache-probe"
+          "$RUNNER_TEMP/vox-coreml-cache-probe" --describe
+      - name: Model-free private dev client compiles
+        run: xcrun swift build --package-path examples/dev-host-client --jobs 3
       - name: Public native Parakeet consumer compiles for iOS Simulator
         run: |
           xcrun swift build --package-path examples/parakeet-lifecycle \
@@ -33,6 +41,9 @@ jobs:
           python3 scripts/test-private-annotation.py
           xcrun swift build --package-path swift --product voxttsd --jobs 3
           python3 scripts/test-private-tts.py
+          python3 scripts/test-dev-host.py \
+            --bin-dir "$(xcrun swift build --package-path swift --show-bin-path)" \
+            --client "$(xcrun swift build --package-path examples/dev-host-client --show-bin-path)/DevHostClient"
       - name: Provider readers do not starve a strict cooperative executor
         env:
           LIBDISPATCH_COOPERATIVE_POOL_STRICT: '1'
@@ -47,4 +58,6 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run --cwd packages/client build
       - run: bun test packages/client/test packages/cli/test packages/web-client/test
+      - name: Dev host lifecycle never touches installed state
+        run: python3 -m unittest discover -s scripts/tests -p test_dev_voxd.py -v
       - run: bun run docs:check

@@ -130,16 +130,18 @@ actor ParakeetCoreMLRuntime: ParakeetRuntime {
 
     private func initialize(from directory: URL, flightID: UUID) async throws {
         var lease: UUID?
+        var loadedSession: Session?
         do {
             if managesResidency {
                 lease = try await NativeASRResidency.shared.acquire(modelId: modelId, unload: { [weak self] in await self?.evict() })
             }
             publishProgress(0.85, status: "loading", flightID: flightID)
-            var loadedSession: Session? = try await loadSession(directory)
+            loadedSession = try await loadSession(directory)
             event(.sessionLoaded)
             publishProgress(0.95, status: "warming", flightID: flightID)
             event(.primingStarted)
-            await prime(session: loadedSession!)
+            if managesResidency { try NativePreparationResources.check(modelId: modelId, phase: "priming") }
+            try await prime(session: loadedSession!)
             event(.primingFinished)
             // Readiness includes priming. Keep the session local across the
             // suspension so another call cannot use or replace it mid-warmup.
@@ -151,6 +153,7 @@ actor ParakeetCoreMLRuntime: ParakeetRuntime {
             event(.ready)
             scheduleIdle()
         } catch {
+            loadedSession = nil // Drop failed/partially primed models before another lease can load.
             if let lease { await NativeASRResidency.shared.release(lease) }
             loadFlight = nil
             event(.loadFailed)
@@ -173,16 +176,12 @@ actor ParakeetCoreMLRuntime: ParakeetRuntime {
     /// prediction stream is compiled on first use, about 30 s apiece when the
     /// system cache is cold, so without this the first dictation longer than
     /// 15 s pays for every compile while the user waits.
-    private func prime(session: Session) async {
+    private func prime(session: Session) async throws {
         let started = Date()
         let chunks = max(1, inferenceConfig.parallelChunkConcurrency) + 1
         let silence = [Float](repeating: 0, count: ParakeetConstants.maxModelSamples * chunks)
-        do {
-            _ = try await session.transcribe(silence)
-            log.info("Parakeet primed in \(Int(Date().timeIntervalSince(started) * 1000)) ms")
-        } catch {
-            log.warning("Parakeet priming failed: \(error.localizedDescription)")
-        }
+        _ = try await session.transcribe(silence)
+        log.info("Parakeet primed in \(Int(Date().timeIntervalSince(started) * 1000)) ms")
     }
 
     func transcribe(samples: [Float]) async throws -> ParakeetInferenceResult {

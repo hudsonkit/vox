@@ -1538,6 +1538,187 @@ The bounded desktop window avoids a 60-second eviction between nearby dictations
 
 Preload again after eviction. `transcribe.stream.status` and native entries in `models.list` expose the actual configured `idleUnloadSeconds`, residency and planned placement. Core ML load logs separate component `model-load` from encoder `compute-plan`, with start/completion/failure, attempt and elapsed milliseconds. They do not log file paths, request content, credentials or underlying error bodies. Streaming telemetry preserves `clientId`, `route: "transcribe.streaming"`, and `modelId`.
 
+## Isolated development daemon
+
+Use the [named private dev host workflow](./dev-runtime.md) to run Talkie against
+a separate capability beside an installed service. `VOX_MODELS_PATH` explicitly
+shares installed bundles without sharing credentials, history, logs or loaded
+model instances. Preparation rejects insufficient temporary-volume disk and
+critical pressure before compiler stages; failed priming no longer reports ready.
+No model/store/installed-service cleanup is automatic.
+
+# Isolated native development host
+
+Source: /docs/dev-runtime
+
+Use a named development host when an Apple app deliberately shares speech across
+processes. This workflow copies **voxd**, its TTS helper and the required SwiftPM resource
+bundle, not Vox.app or Talkie.app. It creates no
+launchd job, does not stop an installed service, and does not change `~/.vox`.
+The app must explicitly select the development capability. Other clients continue
+to discover their existing endpoint.
+
+## Build and install private copies
+
+Check out the exact reviewed Vox revision first. Build both executables explicitly:
+
+```sh
+xcrun swift build --package-path swift -c release --product voxd --jobs 3
+xcrun swift build --package-path swift -c release --product voxttsd --jobs 3
+VOX_BIN="$(xcrun swift build --package-path swift -c release --show-bin-path)"
+VOX_REV="$(git rev-parse HEAD)"
+
+# Set this to an EXISTING Vox model-store root, not a FluidAudio cache.
+# It must contain the installed pinned Parakeet v3 and/or Unified bundles.
+export EXISTING_VOX_MODELS="$HOME/.vox/cache/models"
+python3 scripts/dev-voxd.py install talkie-native \
+  --bin-dir "$VOX_BIN" --models-path "$EXISTING_VOX_MODELS" --revision "$VOX_REV"
+```
+
+Installation creates owner-only copies/state under `~/.vox-dev/talkie-native/`.
+The script refuses an existing name, a symlink/private-directory violation, a
+missing executable/resource bundle or an unknown model-store root. It records binary hashes and
+the explicitly supplied source revision. Use a new name to stage another build;
+do not overwrite a running copy.
+
+`VOX_MODELS_PATH` selects the model-store root independently of `VOX_HOME`.
+Sharing installed files does **not** share loaded model instances across processes.
+One daemon still has one native ASR residency slot. The default model-store path
+remains `VOX_HOME/cache/models`; its existing path/ownership checks are unchanged.
+An explicit root is trusted configuration; choose a same-user absolute directory.
+Do not use symlinks to bypass owned model-leaf checks. Explicit model installation
+or deletion can mutate a shared installation, so coordinate model management.
+
+## Run and connect
+
+In one terminal, run the supervisor in the foreground:
+
+```sh
+python3 scripts/dev-voxd.py run talkie-native
+```
+
+It starts only its copied `bin/voxd --private`. Default idle retention is 900 seconds;
+`--idle-seconds 60` selects the earlier desktop interval for a controlled reload
+test. The model root comes from the installation manifest. These paths are separate:
+
+| Purpose | Development path |
+|---|---|
+| Runtime/log/history home | `~/.vox-dev/talkie-native/home` |
+| Private capability | `~/.vox-dev/talkie-native/runtime.json` |
+| Unix socket | `~/.vox-dev/talkie-native/voxd.sock` |
+| Executables | `~/.vox-dev/talkie-native/bin` |
+
+The daemon generates its own token and publishes the capability as a same-user
+0600 file in a 0700 directory. No token belongs in argv, environment, a launchd
+plist or diagnostic output. No TCP listener opens. Existing `VOX_*` endpoint
+settings are fenced from the child. The supervisor prints the capability path,
+not its contents. A per-name lease prevents two instances.
+
+In the development **Agent's process environment**, select only:
+
+```sh
+export VOX_RUNTIME_PATH="$HOME/.vox-dev/talkie-native/runtime.json"
+```
+
+Unset `VOX_SOCKET_PATH` and `VOX_AUTH_TOKEN` in the client if they were inherited:
+an explicit endpoint/token pair takes precedence over capability discovery. A
+Swift client uses the lightweight `VoxClient` product and
+`VoxDaemonClient(clientId:).connectDiscovered()`. It must not launch a fallback
+engine or daemon when discovery fails. Do not export the dev endpoint globally
+with `launchctl setenv`; the Talkie lane owns isolated dev Agent/UI routing.
+
+## Explicit preparation and verification
+
+The public model-free example client can inspect the exact endpoint and operate
+native speech without embedding `VoxEngine`:
+
+```sh
+xcrun swift build --package-path examples/dev-host-client --jobs 3
+VOX_PROBE="$(xcrun swift build --package-path examples/dev-host-client --show-bin-path)/DevHostClient"
+"$VOX_PROBE" health
+"$VOX_PROBE" models
+"$VOX_PROBE" prepare parakeet:v3
+"$VOX_PROBE" file parakeet:v3 "$AUDIO_FILE"
+"$VOX_PROBE" prepare nemotron:unified-560ms
+"$VOX_PROBE" stream nemotron:unified-560ms "$MONO_16KHZ_WAV" --paced
+```
+
+If inventory says the selected revision is not installed, installation is a
+separate explicit command, not a startup side effect:
+
+```sh
+"$VOX_PROBE" install parakeet:v3
+"$VOX_PROBE" install nemotron:unified-560ms
+```
+
+Batch remains **Parakeet v3**; live PCM remains **Unified 560 ms**. Preparing one
+can evict the other. `models.preload` emits `models.progress`; readiness includes
+priming and verified planned ANE placement. A failed prime now fails preparation,
+releases the temporary models before releasing residency, and never reports ready.
+Preparation has an explicit 600-second client budget in this example. File
+inference has a separate 120-second budget. A client timeout/cancel does not prove
+that an OS compiler invocation has stopped; never replay automatically.
+
+Native PCM uses `transcribe.stream.start/append/finish/cancel`. Input is finite
+mono Float32 little-endian at 16 kHz, at most 16000 samples per acknowledged packet.
+Finish flushes the tail; cancel discards. Connection, client and session identity
+own mutations. Keep source audio in the caller until successful final delivery or
+an explicit user discard. The example's `--paced` reports wall-clock first partial;
+unpaced timing is compute throughput, not capture latency.
+
+For a controlled same-daemon idle test, start the host with `--idle-seconds 60`,
+then run `"$VOX_PROBE" cycle MODEL_ID "$MONO_16KHZ_WAV"`. It refuses missing models,
+prepares and infers, observes actual `preloaded:false`, then prepares and infers
+again. It does not install, pin a second model or treat cached warmup history as
+readiness. The separate `vox-asr-bench lifecycle` diagnostic additionally tests
+public embedded explicit unload and idle unload, using the same production models.
+
+## Measured reload behavior
+
+The [2026-10-31 native verification report](reports/native-dev-reload-2026-10-31.md)
+records actual explicit and idle unload/reload with inference. It also records
+unresolved slow Unified preparation and a separate normal dev-host compute-plan
+failure. Do not treat the resource budget or 900-second retention as a cache fix.
+Core ML stage failures include at most three allowlisted error domains/numeric
+codes; raw error descriptions, arbitrary domains and userInfo are not logged.
+Coordinate native compiler work with other dev hosts before measuring reload.
+
+## Resource admission
+
+On macOS, encoder loading, compute-plan loading and first-use priming require a
+**3 GiB temporary-volume free-disk reserve** and reject critical kernel memory
+pressure before that stage. Historical ANE compiler logs show a failed allocation
+near 2.40 GiB. This reserve is a conservative safety budget, not a universal Core ML
+minimum or proof that the OS will retain specialization caches. Mobile has no new
+default disk floor pending device measurements.
+
+`VOX_ASR_MIN_FREE_DISK_BYTES` configures the library budget; invalid values fail.
+An explicit zero disables this disk floor, not placement checks. For a dev host,
+use `run ... --minimum-free-disk-bytes N`. A rejection is actionable and leaves
+native readiness false. It never deletes caches or falls back to CPU. Free space
+or close competing work, then explicitly prepare again. Already resident reuse
+still works without an encoder reload. Disk/cache resource pressure and code
+changes must be reported separately; healthy-host success is not proof that every
+historical OS cache failure is fixed.
+
+## Stop and remove
+
+Press Control-C in the supervisor terminal, or use:
+
+```sh
+python3 scripts/dev-voxd.py status talkie-native
+python3 scripts/dev-voxd.py stop talkie-native
+python3 scripts/dev-voxd.py status talkie-native
+python3 scripts/dev-voxd.py remove talkie-native
+```
+
+Stop verifies the supervisor's PID/start identity before signalling only that
+supervisor. It does not signal an installed app or the system compiler. Normal
+daemon shutdown removes its own capability/socket. Remove refuses a running lease
+or remaining capability and deletes only this named dev copy/state, never the
+external shared model store. Preserve failed-run evidence before removal. Nothing
+in this workflow installs, merges or releases an application.
+
 # Models and plugins
 
 Source: /docs/models
@@ -2838,6 +3019,77 @@ The JSON report separates preload and priming from dictation. It reports process
 
 These measurements exclude other processes and system-wide accelerator memory. Compare candidates on the same audio, host, and build configuration. A small smoke corpus is not a production accuracy evaluation.
 
+### Native preparation stage diagnostics
+
+`CoreML load stage` records model ID, component, phase, state, attempt and elapsed
+milliseconds. Load and compute-plan are separate phases. Failures record at most
+three allowlisted NSError domains/numeric codes, never arbitrary domains, raw
+descriptions, paths, feature values or request text.
+
+Parakeet also emits `CoreML prediction stage` for preprocessor prediction, encoder
+prediction and aggregate decoder/joint decoding. An opaque `spanId` groups those
+three phases for one chunk across parallel workers, including preparation's
+silence chunks. These elapsed times include framework queueing and any first-use
+specialization. They are not hardware execution counters. Concurrent chunk times
+must not be summed as wall-clock preparation time. No audio, tokens or vocabulary
+values enter these diagnostics. Stage logs do not change concurrency, placement,
+model configuration, warmup or idle eviction.
+
+The [normal dev-host reload report](reports/native-dev-reload-2026-10-31.md)
+distinguishes controlled successes from the still-open normal-Agent reliability
+gate. Green CI does not close that native gate.
+
+### Isolate Core ML cache behavior
+
+`scripts/probe-coreml-cache.swift` isolates public Core ML model/plan loading from
+Vox, ASR prediction and Agent boot. It accepts an existing compiled encoder.
+`model-plan` uses URL factories; `shared-asset` uses one MLModelAsset for model and
+plan within each phase; `plan-only` skips MLModel construction. No mode retains
+models, plans or assets across teardown. Weak references must clear before the
+next model loads. The final phase waits at least the requested interval after
+explicit teardown; this is not the speech runtime's idle timer.
+
+Run only in a coordinated native window on macOS 15+ Apple Silicon, without a
+competing model prepare/build. Use a private new report path and existing model
+files. The probe requires 5 GiB temporary-volume headroom before each API, pressure
+level 1 at launch and no critical pressure thereafter. These are measurement
+safety policies, not guarantees against OS cache eviction. Do not clear model or
+Core ML caches to make a result pass.
+
+```sh
+PRIVATE_DIR="$(mktemp -d)"
+xcrun swiftc -parse-as-library -swift-version 6 -O \
+  -target "$(uname -m)-apple-macos15.0" \
+  scripts/probe-coreml-cache.swift -o "$PRIVATE_DIR/CoreMLCacheProbe"
+"$PRIVATE_DIR/CoreMLCacheProbe" --describe
+# Explicit hardware run; set EXISTING_ENCODER to an installed Encoder.mlmodelc.
+"$PRIVATE_DIR/CoreMLCacheProbe" model-plan "$EXISTING_ENCODER" \
+  "$PRIVATE_DIR/model-plan.json" 60
+```
+
+Reports contain phase timings, physical footprint, placement counts, source-file
+metadata, weak-reference lifetime checks and bounded numeric failures. They contain
+no audio, transcript or plain model path. A cleared MLModel weak reference does
+not prove that OS driver caches are empty. This component probe is not ASR
+inference, accuracy or normal-Agent acceptance. CI compiles it and runs only
+`--describe`, never hardware model loading.
+
+Core ML owns its specialization cache and can evict it under storage pressure.
+Free-disk bytes and kernel memory-pressure level do not prove cache stability.
+Inspect actual cache entries and system purge events when investigating nonreuse.
+For historical unified-log queries, convert Vox's UTC timestamps to the input
+time zone; `log show --timezone UTC` formats output but does not make an ambiguous
+local `--start` string a UTC instant. Relative queries avoid that ambiguity:
+
+```sh
+log show --last 10m --timezone UTC --style compact --info \
+  --predicate 'subsystem CONTAINS[c] "coreml" OR subsystem CONTAINS[c] "cache_delete"'
+```
+
+Keep system logs private. Redacted descriptions and a purge event alone do not
+prove which actor deleted a particular file. See the native reload report for
+measured cache-loss evidence and the remaining gate.
+
 # Architecture
 
 Source: /docs/architecture
@@ -3653,6 +3905,23 @@ Source: docs/agent/architecture.agent.md
 - Swift owns the embeddable engine and companion transport surfaces
 - keep model lifecycle and warm-up explicit across layers
 
+# Isolated development host facts
+
+Source: docs/agent/dev-runtime.agent.md
+
+# Isolated development host facts
+
+- Build voxd + voxttsd explicitly, preferably release; install copies with `python3 scripts/dev-voxd.py install NAME --bin-dir "$VOX_BIN" --models-path "$EXISTING_VOX_MODELS" --revision "$VOX_REV"`.
+- Names use a new owner-only ~/.vox-dev/NAME; no launchd, installed-app overwrite or installed-service stop. Run is foreground; stop verifies supervisor start identity; remove rejects running/remaining capability and never deletes external models.
+- Run sets separate VOX_HOME, VOX_SOCKET_PATH and VOX_RUNTIME_PATH; no inherited endpoint/token. Generated token remains only in owner-only capability. Client selects VOX_RUNTIME_PATH for its own process; unset explicit socket/token, no global launchctl env or fallback daemon.
+- VOX_MODELS_PATH explicitly selects a shared installed-model root, independent of runtime/log/history home. Defaults and model-leaf ownership protections remain unchanged. Sharing files is not sharing residency; model-management mutations need coordination.
+- Lightweight example: examples/dev-host-client supports health/models/install/prepare/file/stream/cycle; --paced measures capture-like wall clock. Prepare 600s, file 120s. Native PCM uses existing owned acknowledged packet/finish/cancel contract; caller preserves source audio on failure.
+- Batch Parakeet v3, live Unified560ms, strict ANE plan check, one native slot. cycle verifies real idle eviction and post-idle inference; vox-asr-bench lifecycle also uses public embedded explicit unload. No fake/injected model runtime or automatic model install.
+- Preparation rejects insufficient temporary-volume disk/critical pressure before encoder load, compute plan and priming. macOS default reserve3GiB; mobile default0 pending measurements. VOX_ASR_MIN_FREE_DISK_BYTES configures; dev run --minimum-free-disk-bytes N. Budget is policy, not a Core ML minimum/cache guarantee. No cache deletion or CPU fallback.
+- Failed Parakeet priming no longer reports ready. Failed temporary batch/live models are released before residency is released. Timeout/cancel does not prove OS compilation stopped; no automatic replay.
+
+- Reload evidence: docs/reports/native-dev-reload-2026-10-31.md. Real release idle60 inference passed both, but Unified reload49.698s and separate normal dev-host plan failure remain unresolved; no cache-reuse fix/own-voice acceptance claim. Stage failure diagnostics: max3 allowlisted domains + numeric codes, never raw bodies/paths/arbitrary domains. Coordinate native compiler lane before tests.
+
 # Models and plugin facts
 
 Source: docs/agent/models.agent.md
@@ -3721,6 +3990,12 @@ Source: docs/agent/observability.agent.md
 - `vox-asr-bench` (Swift executable) reports physical process footprint, per-chunk latency, first partial by input-audio time and unpaced compute time, planned placement, and normalized WER when references exist.
 - Benchmark takes model id, explicit streaming model directory (batch uses installed VOX_HOME cache), and a mono 16 kHz WAV or a directory of WAV + matching .txt references. Use `--paced` for wall-clock first-partial latency.
 - Run a release build; distinguish cold preload/ANE compile time from warm inference, and process footprint from system-wide accelerator memory.
+
+- Native diagnostics distinguish CoreML load stage (component model-load/compute-plan) and prediction stage (Parakeet preprocessor, encoder, aggregate decoder-joint). Opaque spanId groups one chunk across workers; includes queue/specialization time, not hardware counters; never sum concurrent spans as wall time. No audio/tokens/paths/raw errors. Numeric error chains max3 allowlisted domains. No concurrency/configuration/placement/eviction changes.
+- Gate evidence: reports/native-dev-reload-2026-10-31.md. Controlled post-unload inference successes do not close the normal-Agent plan-failure/slow-prime gate; green CI is not native acceptance.
+
+- Standalone scripts/probe-coreml-cache.swift: model-plan / shared-asset / plan-only, existing encoder only, no predictions/downloads/cache deletion/retries/retained models. macOS15+ANE, 5GiB before APIs, launch pressure1 then noncritical; private new report; weak model/plan/asset teardown. Explicit release+pause is NOT the runtime idle timer. CI --describe only, no hardware acceptance.
+- Storage cache eviction can occur even with gigabytes free and memory pressure1/2. Track entries/purge events; ambiguous log --start strings are local time, --timezone UTC changes output. Keep raw logs private and distinguish correlation from per-file deleter proof.
 
 # Vox Facts
 
@@ -3932,6 +4207,9 @@ Source: docs/agent/runtime.agent.md
 - Generation + authenticated voices use connection-owned tickets reserved before task launch. Client disconnect cancels only its own work. Separate client connections for independent cancellation; no public one-shot cancel RPC.
 - Stock bundled helper propagates task cancellation/transport timeout by numeric JSON-RPC ID through ExternalTTSProvider/StdioTransport to HTTP. Shared process and other calls survive. Custom TTS requires supportsRequestCancellation=true; absent/false cancels local wait only. Never kill shared provider to cancel one call.
 - Regression: scripts/test-private-tts.py, two model-free clients, stock private daemon/helper, loopback vendors only, reflected-key errors/non-retention, concurrent client A cancellation + B survival, unchanged helper PID, clean EOF. Real vendor stop/retention/refund not guaranteed. See reports/tts-privacy-cancellation-2026-10-30.md.
+
+- Isolated dev recipe: docs/dev-runtime.md + scripts/dev-voxd.py; named private copies, no launchd/installed overwrite. VOX_MODELS_PATH shares installed files independently of VOX_HOME/runtime capability; no shared residency across processes.
+- Native preparation admission: macOS3GiB temporary-volume reserve (policy, not Core ML minimum), critical-pressure rejection; VOX_ASR_MIN_FREE_DISK_BYTES explicit override, dev run --minimum-free-disk-bytes. Checks encoder load/compute-plan/prime; no CPU fallback/cache deletion. Failed prime now fails readiness; failed temporary models drop before residency release.
 
 # SDK Facts
 

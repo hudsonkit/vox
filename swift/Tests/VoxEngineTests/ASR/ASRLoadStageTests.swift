@@ -24,6 +24,7 @@ struct ASRLoadStageTests {
         #expect(events.value.map(\.phase) == ["model-load", "model-load", "compute-plan", "compute-plan"])
         #expect(events.value.map(\.attempt) == [1, 1, 2, 2])
         #expect(events.value.allSatisfy { $0.elapsedMs >= 0 && $0.modelId == "parakeet:v3" })
+        #expect(events.value.allSatisfy { $0.failures.isEmpty })
     }
 
     @Test("Failed sync and async phases record failure and rethrow without reflecting error bodies")
@@ -36,5 +37,53 @@ struct ASRLoadStageTests {
             try await ASRLoadStage(modelId: "fixture", component: "encoder", phase: "compute-plan", observe: events.append).measureAsync { throw Failure.fixture }
         }
         #expect(events.value.map(\.state) == ["started", "failed", "started", "failed"])
+    }
+
+    @Test("Failure diagnostics retain bounded numeric causes without paths, bodies or arbitrary domains")
+    func safeFailureCauses() async {
+        let secret = "fixture-secret-never-log"
+        let underlying = NSError(domain: NSPOSIXErrorDomain, code: 28,
+                                 userInfo: [NSLocalizedDescriptionKey: secret])
+        let opaque = NSError(domain: secret, code: 19,
+                            userInfo: [NSUnderlyingErrorKey: underlying, NSFilePathErrorKey: secret])
+        let error = NSError(domain: "com.apple.CoreML", code: 3,
+                            userInfo: [NSUnderlyingErrorKey: opaque, NSLocalizedDescriptionKey: secret])
+        let events = LoadEvents()
+        do {
+            try await ASRLoadStage(modelId: "parakeet:v3", component: "encoder", phase: "compute-plan", observe: events.append)
+                .measureAsync { throw error }
+            Issue.record("Expected original error")
+        } catch let caught as NSError {
+            #expect(caught === error)
+        }
+        #expect(events.value.last?.failures == [
+            .init(domain: "com.apple.CoreML", code: 3), .init(domain: "other", code: 19),
+            .init(domain: NSPOSIXErrorDomain, code: 28)])
+        #expect(!String(describing: events.value).contains(secret))
+
+        let deeper = NSError(domain: NSCocoaErrorDomain, code: 1, userInfo: [NSUnderlyingErrorKey: error])
+        #expect(ASRLoadStage.Failure.summarize(deeper).count == 3)
+    }
+
+    @Test("Prediction spans stay distinct from load stages and correlate each chunk without input data")
+    func predictionSpans() async throws {
+        let events = LoadEvents()
+        let chunk = UUID()
+        let otherChunk = UUID()
+        let value = try await ASRLoadStage(
+            modelId: "parakeet:v3", component: "encoder", phase: "prediction",
+            kind: .prediction, spanId: chunk, observe: events.append
+        ).measureAsync { try await Task.sleep(for: .milliseconds(1)); return 42 }
+        #expect(value == 42)
+        do {
+            _ = try ASRLoadStage(
+                modelId: "parakeet:v3", component: "decoder-joint", phase: "decode",
+                kind: .prediction, spanId: otherChunk, observe: events.append
+            ).sync { throw Failure.fixture }
+        } catch {}
+        #expect(events.value.map(\.kind) == [.prediction, .prediction, .prediction, .prediction])
+        #expect(events.value.map(\.spanId) == [chunk, chunk, otherChunk, otherChunk])
+        #expect(events.value.map(\.state) == ["started", "completed", "started", "failed"])
+        #expect(events.value.map(\.component) == ["encoder", "encoder", "decoder-joint", "decoder-joint"])
     }
 }

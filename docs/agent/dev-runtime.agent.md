@@ -1,0 +1,12 @@
+# Isolated development host facts
+
+- Build voxd + voxttsd explicitly, preferably release; install copies with `python3 scripts/dev-voxd.py install NAME --bin-dir "$VOX_BIN" --models-path "$EXISTING_VOX_MODELS" --revision "$VOX_REV"`.
+- Names use a new owner-only ~/.vox-dev/NAME; no launchd, installed-app overwrite or installed-service stop. Run is foreground; stop verifies supervisor start identity; remove rejects running/remaining capability and never deletes external models.
+- Run sets separate VOX_HOME, VOX_SOCKET_PATH and VOX_RUNTIME_PATH; no inherited endpoint/token. Generated token remains only in owner-only capability. Client selects VOX_RUNTIME_PATH for its own process; unset explicit socket/token, no global launchctl env or fallback daemon.
+- VOX_MODELS_PATH explicitly selects a shared installed-model root, independent of runtime/log/history home. Defaults and model-leaf ownership protections remain unchanged. Sharing files is not sharing residency; model-management mutations need coordination.
+- Lightweight example: examples/dev-host-client supports health/models/install/prepare/file/stream/cycle; --paced measures capture-like wall clock. Prepare 600s, file 120s. Native PCM uses existing owned acknowledged packet/finish/cancel contract; caller preserves source audio on failure.
+- Batch Parakeet v3, live Unified560ms, strict ANE plan check, one native slot. cycle verifies real idle eviction and post-idle inference; vox-asr-bench lifecycle also uses public embedded explicit unload. No fake/injected model runtime or automatic model install.
+- Preparation rejects insufficient temporary-volume disk/critical pressure before encoder load, compute plan and priming. macOS default reserve3GiB; mobile default0 pending measurements. VOX_ASR_MIN_FREE_DISK_BYTES configures; dev run --minimum-free-disk-bytes N. Budget is policy, not a Core ML minimum/cache guarantee. No cache deletion or CPU fallback.
+- Failed Parakeet priming no longer reports ready. Failed temporary batch/live models are released before residency is released. Timeout/cancel does not prove OS compilation stopped; no automatic replay.
+
+- Reload evidence: docs/reports/native-dev-reload-2026-10-31.md. Real release idle60 inference passed both, but Unified reload49.698s and separate normal dev-host plan failure remain unresolved; no cache-reuse fix/own-voice acceptance claim. Stage failure diagnostics: max3 allowlisted domains + numeric codes, never raw bodies/paths/arbitrary domains. Coordinate native compiler lane before tests.

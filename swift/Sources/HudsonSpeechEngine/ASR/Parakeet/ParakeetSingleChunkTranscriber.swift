@@ -60,24 +60,37 @@ final class ParakeetSingleChunkTranscriber: @unchecked Sendable {
         isLastChunk: Bool
     ) async throws -> (tokens: [ParakeetChunkToken], encoderSequenceLength: Int) {
         guard !samples.isEmpty else { return ([], 0) }
+        // One opaque span correlates this chunk's stages across parallel workers.
+        // Do not log audio, feature values, vocabulary tokens or user paths.
+        let spanId = UUID()
 
         let (alignedSamples, frameAlignedLength) = frameAlignedAudio(samples, allowAlignment: contextSamples == 0)
         let paddedAudio = padAudioIfNeeded(alignedSamples, targetLength: ParakeetConstants.maxModelSamples)
         let preprocessorInput = try preparePreprocessorInput(paddedAudio, actualLength: frameAlignedLength)
-        let preprocessorOutput = try await models.preprocessor.compatPrediction(
-            from: preprocessorInput,
-            options: predictionOptions
-        )
+        let preprocessorOutput = try await ASRLoadStage(
+            modelId: models.modelId, component: "preprocessor", phase: "prediction",
+            kind: .prediction, spanId: spanId
+        ).measureAsync {
+            try await models.preprocessor.compatPrediction(
+                from: preprocessorInput,
+                options: predictionOptions
+            )
+        }
 
         let encoderInput = try prepareEncoderInput(
             encoder: models.encoder,
             preprocessorOutput: preprocessorOutput,
             originalInput: preprocessorInput
         )
-        let encoderOutputProvider = try await models.encoder.compatPrediction(
-            from: encoderInput,
-            options: predictionOptions
-        )
+        let encoderOutputProvider = try await ASRLoadStage(
+            modelId: models.modelId, component: "encoder", phase: "prediction",
+            kind: .prediction, spanId: spanId
+        ).measureAsync {
+            try await models.encoder.compatPrediction(
+                from: encoderInput,
+                options: predictionOptions
+            )
+        }
 
         let encoderOutput = try ParakeetCoreMLSupport.extractFeatureValue(
             from: encoderOutputProvider,
@@ -91,18 +104,23 @@ final class ParakeetSingleChunkTranscriber: @unchecked Sendable {
         )
 
         var decoderState = try ParakeetDecoderState(decoderLayers: 2)
-        let hypothesis = try await decoder.decodeWithTimings(
-            encoderOutput: encoderOutput,
-            encoderSequenceLength: encoderLength[0].intValue,
-            actualAudioFrames: ParakeetConstants.calculateEncoderFrames(from: max(0, samples.count - contextSamples)),
-            decoderModel: models.decoder,
-            jointModel: models.joint,
-            decoderState: &decoderState,
-            contextFrameAdjustment: contextSamples / ParakeetConstants.samplesPerEncoderFrame,
-            isLastChunk: isLastChunk,
-            globalFrameOffset: chunkStart / ParakeetConstants.samplesPerEncoderFrame,
-            vocabulary: models.vocabulary
-        )
+        let hypothesis = try await ASRLoadStage(
+            modelId: models.modelId, component: "decoder-joint", phase: "decode",
+            kind: .prediction, spanId: spanId
+        ).measureAsync {
+            try await decoder.decodeWithTimings(
+                encoderOutput: encoderOutput,
+                encoderSequenceLength: encoderLength[0].intValue,
+                actualAudioFrames: ParakeetConstants.calculateEncoderFrames(from: max(0, samples.count - contextSamples)),
+                decoderModel: models.decoder,
+                jointModel: models.joint,
+                decoderState: &decoderState,
+                contextFrameAdjustment: contextSamples / ParakeetConstants.samplesPerEncoderFrame,
+                isLastChunk: isLastChunk,
+                globalFrameOffset: chunkStart / ParakeetConstants.samplesPerEncoderFrame,
+                vocabulary: models.vocabulary
+            )
+        }
 
         let tokens = zip(
             zip(zip(hypothesis.tokenIDs, hypothesis.timestamps), hypothesis.tokenConfidences),

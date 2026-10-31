@@ -11,6 +11,7 @@ struct ParakeetModelURLs: Sendable {
 }
 
 struct ParakeetLoadedModels: Sendable {
+    let modelId: String
     let preprocessor: MLModel
     let encoder: MLModel
     let decoder: MLModel
@@ -64,6 +65,7 @@ struct ParakeetModelLoader: Sendable {
         let configuration = modelConfiguration(computeUnits: .cpuAndNeuralEngine)
 
         return ParakeetLoadedModels(
+            modelId: manifest.modelId,
             preprocessor: preprocessor,
             encoder: encoder,
             decoder: decoder,
