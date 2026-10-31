@@ -76,11 +76,110 @@ public struct SpeechOutputRouteCapability: Sendable, Equatable {
     }
 }
 
+/// Per-request LOCAL playback options, separate from provider synthesis parameters.
+/// nil means the platform default; explicit values require sink support.
+public struct SpeechOutputOptions: Sendable, Equatable {
+    public let pitchMultiplier: Double?
+    public let volume: Double?
+
+    public init(pitchMultiplier: Double? = nil, volume: Double? = nil) {
+        self.pitchMultiplier = pitchMultiplier
+        self.volume = volume
+    }
+
+    func validate() throws {
+        if let pitchMultiplier, !pitchMultiplier.isFinite || !(0.5...2.0).contains(pitchMultiplier) {
+            throw SpeechOutputControlError.invalidPitchMultiplier
+        }
+        if let volume, !volume.isFinite || !(0.0...1.0).contains(volume) {
+            throw SpeechOutputControlError.invalidVolume
+        }
+    }
+
+    func requireSupport(_ capabilities: SpeechPlaybackCapabilities) throws {
+        if pitchMultiplier != nil, !capabilities.canSetPitch { throw SpeechOutputControlError.unsupportedPitch }
+        if volume != nil, !capabilities.canSetVolume { throw SpeechOutputControlError.unsupportedVolume }
+    }
+}
+
+/// Capabilities of the actual playback sink, not synthesis-model accuracy.
+public struct SpeechPlaybackCapabilities: Sendable, Equatable {
+    public var canPauseResume: Bool
+    public var canReportUTF16Ranges: Bool
+    public var canSeekByReplacement: Bool
+    public var canSetPitch: Bool
+    public var canSetVolume: Bool
+
+    public init(canPauseResume: Bool = false, canReportUTF16Ranges: Bool = false, canSeekByReplacement: Bool = false, canSetPitch: Bool = false, canSetVolume: Bool = false) {
+        self.canPauseResume = canPauseResume
+        self.canReportUTF16Ranges = canReportUTF16Ranges
+        self.canSeekByReplacement = canSeekByReplacement
+        self.canSetPitch = canSetPitch
+        self.canSetVolume = canSetVolume
+    }
+
+    public static let unavailable = Self()
+    public static let systemSpeech = Self(canPauseResume: true, canReportUTF16Ranges: true, canSeekByReplacement: true, canSetPitch: true, canSetVolume: true)
+    public static let generatedAudio = Self(canPauseResume: true, canSetVolume: true)
+}
+
+/// Both fields must match for an identity-scoped control to mutate playback.
+public struct SpeechOutputIdentity: Sendable, Equatable, Hashable {
+    public let requestId: String
+    public let generation: UInt64
+    public init(requestId: String, generation: UInt64) {
+        self.requestId = requestId
+        self.generation = generation
+    }
+}
+
+/// UTF-16 code units, relative to the original, unmodified SynthesisRequest.text.
+/// These are platform will-speak callbacks, not forced alignment or playback clocks.
+public struct SpeechUTF16Range: Sendable, Equatable {
+    public let location: Int
+    public let length: Int
+    public init(location: Int, length: Int) {
+        self.location = location
+        self.length = length
+    }
+    public var nsRange: NSRange { NSRange(location: location, length: length) }
+}
+
+public struct SpeechOutputStatus: Sendable, Equatable {
+    public let identity: SpeechOutputIdentity
+    public let phase: SpeechOutputPhase
+    public let capabilities: SpeechPlaybackCapabilities
+    public let startingAtUTF16Offset: Int
+    public let originalTextUTF16Length: Int
+    public let options: SpeechOutputOptions
+}
+
+public enum SpeechOutputControlError: Error, Sendable, Equatable, LocalizedError {
+    case staleIdentity, unsupported, notReady, controlPending, invalidUTF16Offset
+    case invalidPitchMultiplier, invalidVolume, unsupportedPitch, unsupportedVolume
+    public var errorDescription: String? {
+        switch self {
+        case .staleIdentity: return "Speech playback identity is no longer active."
+        case .unsupported: return "The playback sink does not support this control."
+        case .notReady: return "Speech playback is not in the required state."
+        case .controlPending: return "A speech playback control is awaiting acknowledgement."
+        case .invalidUTF16Offset: return "Seek requires a character boundary before nonempty remaining text."
+        case .invalidPitchMultiplier: return "Output pitchMultiplier must be finite and within 0.5...2.0."
+        case .invalidVolume: return "Output volume must be finite and within 0...1."
+        case .unsupportedPitch: return "The playback sink does not support per-request output pitch."
+        case .unsupportedVolume: return "The playback sink does not support per-request output volume."
+        }
+    }
+}
+
 public enum SpeechOutputPhase: String, Sendable, Codable, Equatable {
     case resolving
     case generating
     case starting
     case playing
+    case paused
+    case resumed
+    case wordRange
     case finished
     case cancelled
     case failed
@@ -93,6 +192,12 @@ public struct SpeechOutputEvent: Sendable, Equatable {
     public var synthesis: SpeechSynthesisIdentity
     public var audioOutput: SpeechAudioOutputRoute
     public var error: String?
+    /// Machine-readable output-option/control failure, without parsing localized error text.
+    public var controlError: SpeechOutputControlError?
+    public var utf16Range: SpeechUTF16Range?
+    public var capabilities: SpeechPlaybackCapabilities
+    public var options: SpeechOutputOptions
+    public var identity: SpeechOutputIdentity { SpeechOutputIdentity(requestId: requestId, generation: generation) }
 
     public init(
         requestId: String,
@@ -100,7 +205,11 @@ public struct SpeechOutputEvent: Sendable, Equatable {
         phase: SpeechOutputPhase,
         synthesis: SpeechSynthesisIdentity,
         audioOutput: SpeechAudioOutputRoute,
-        error: String? = nil
+        error: String? = nil,
+        utf16Range: SpeechUTF16Range? = nil,
+        capabilities: SpeechPlaybackCapabilities = .unavailable,
+        options: SpeechOutputOptions = SpeechOutputOptions(),
+        controlError: SpeechOutputControlError? = nil
     ) {
         self.requestId = requestId
         self.generation = generation
@@ -108,6 +217,10 @@ public struct SpeechOutputEvent: Sendable, Equatable {
         self.synthesis = synthesis
         self.audioOutput = audioOutput
         self.error = error
+        self.controlError = controlError
+        self.utf16Range = utf16Range
+        self.capabilities = capabilities
+        self.options = options
     }
 }
 

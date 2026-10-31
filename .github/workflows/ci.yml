@@ -26,6 +26,12 @@ jobs:
             --triple arm64-apple-ios17.0-simulator \
             --sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)" \
             --scratch-path "$RUNNER_TEMP/vox-parakeet-ios" --jobs 3
+      - name: Public readout controls compile for iOS Simulator
+        run: |
+          xcrun swift build --package-path examples/apple-readout \
+            --triple arm64-apple-ios17.0-simulator \
+            --sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)" \
+            --scratch-path "$RUNNER_TEMP/vox-readout-ios" --jobs 3
       - run: xcrun swift test --package-path swift --jobs 3
       - name: Private speech routes use loopback fixtures, never paid vendors
         run: |
@@ -33,10 +39,10 @@ jobs:
           python3 scripts/test-private-annotation.py
           xcrun swift build --package-path swift --product voxttsd --jobs 3
           python3 scripts/test-private-tts.py
-      - name: Provider readers do not starve a strict cooperative executor
+      - name: Provider readers and readout controls pass on a strict cooperative executor
         env:
           LIBDISPATCH_COOPERATIVE_POOL_STRICT: '1'
-        run: xcrun swift test --package-path swift --skip-build --filter StdioTransportTests
+        run: xcrun swift test --package-path swift --skip-build --filter 'StdioTransportTests|Readout|NativeStreamingASRTests'
   clients-and-docs:
     runs-on: ubuntu-latest
     steps:
