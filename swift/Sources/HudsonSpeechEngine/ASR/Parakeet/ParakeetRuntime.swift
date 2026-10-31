@@ -3,6 +3,8 @@ import VoxCore
 
 protocol ParakeetRuntime: Sendable {
     var isAvailable: Bool { get }
+    func beginUse() async
+    func endUse() async
     func snapshot() async -> ParakeetRuntimeSnapshot
     func unload() async throws
     func setIdleUnload(seconds: Double) async throws
@@ -20,13 +22,4 @@ struct ParakeetRuntimeSnapshot: Sendable {
 struct ParakeetInferenceResult: Sendable {
     let text: String
     let words: [WordTiming]
-}
-
-extension ParakeetRuntime {
-    func snapshot() async -> ParakeetRuntimeSnapshot {
-        ParakeetRuntimeSnapshot(preloaded: await isPreloaded(), placement: await computePlacement())
-    }
-    func unload() async throws { throw ParakeetLifecycleError.unsupported }
-    func setIdleUnload(seconds: Double) async throws { throw ParakeetLifecycleError.unsupported }
-    func computePlacement() async -> CoreMLPlacement? { nil }
 }

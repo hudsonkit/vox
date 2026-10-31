@@ -23,6 +23,7 @@ actor ParakeetCoreMLRuntime: ParakeetRuntime {
     private var session: Session?
     private var idleTask: Task<Void, Never>?
     private var activeTranscriptions = 0
+    private var operationReservations = 0
     private var unloading = false
     private var idleSeconds: Double
     private let managesResidency: Bool
@@ -221,8 +222,16 @@ actor ParakeetCoreMLRuntime: ParakeetRuntime {
         NSError(domain: "VoxEngine", code: 4, userInfo: [NSLocalizedDescriptionKey: "Parakeet runtime is not initialized."])
     }
 
+    func beginUse() async {
+        operationReservations += 1
+        idleTask?.cancel(); idleTask = nil
+    }
+    func endUse() async {
+        operationReservations -= 1
+        scheduleIdle()
+    }
     func unload() async throws {
-        guard !unloading, activeTranscriptions == 0, loadFlight == nil else { throw ParakeetLifecycleError.busy }
+        guard !unloading, operationReservations == 0, activeTranscriptions == 0, loadFlight == nil else { throw ParakeetLifecycleError.busy }
         unloading = true
         idleTask?.cancel(); idleTask = nil
         defer { unloading = false }
@@ -232,14 +241,14 @@ actor ParakeetCoreMLRuntime: ParakeetRuntime {
         }
         evict() // Also clear an already nonresident session; metadata actors may stay cached.
     }
-    func setIdleUnload(seconds: Double) throws {
+    func setIdleUnload(seconds: Double) async throws {
         guard seconds.isFinite, seconds >= 0 else { throw ParakeetLifecycleError.invalidIdleTimeout }
         idleSeconds = seconds
         idleTask?.cancel(); idleTask = nil
         scheduleIdle()
     }
 
-    func snapshot() -> ParakeetRuntimeSnapshot { ParakeetRuntimeSnapshot(preloaded: session != nil, placement: session?.placement) }
+    func snapshot() async -> ParakeetRuntimeSnapshot { ParakeetRuntimeSnapshot(preloaded: session != nil, placement: session?.placement) }
     func computePlacement() async -> CoreMLPlacement? { session?.placement }
     private func evict() {
         let hadSession = session != nil
@@ -247,11 +256,11 @@ actor ParakeetCoreMLRuntime: ParakeetRuntime {
         if hadSession { event(.sessionReleased) }
     }
     private func evictIfIdle() {
-        guard !unloading, activeTranscriptions == 0, loadFlight == nil else { return }
+        guard !unloading, operationReservations == 0, activeTranscriptions == 0, loadFlight == nil else { return }
         evict()
     }
     private func scheduleIdle() {
-        guard !unloading, activeTranscriptions == 0, loadFlight == nil, session != nil else { return }
+        guard !unloading, operationReservations == 0, activeTranscriptions == 0, loadFlight == nil, session != nil else { return }
         idleTask?.cancel()
         let seconds = idleSeconds
         guard seconds.isFinite, seconds > 0 else { return }

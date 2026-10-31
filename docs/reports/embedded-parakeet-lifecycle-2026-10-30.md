@@ -58,7 +58,7 @@ Receipts are kept until child removal succeeds so partial failures retain owners
 
 ## Verification
 
-- Ten new lifecycle/storage tests plus existing Parakeet tests pass (41 focused
+- Eleven new lifecycle/storage tests plus existing Parakeet tests pass (42 focused
   tests in total). A weak lifetime witness captured by the production runtime's
   injected Session becomes nil after unload, including unload by another provider
   owner while the first provider remains retained. Reload creates a new Session.
@@ -68,7 +68,7 @@ Receipts are kept until child removal succeeds so partial failures retain owners
   not a real Core ML model or an accuracy measurement.
 - Busy guards cover held inference, initialization and download. Cancelling the
   first install waiter does not make the directory deletable or cancel another
-  owner. Idle timeout and model-scoped active residency guards are tested.
+  owner. Idle timeout, reservations spanning file preparation, and model-scoped active residency guards are tested.
 - Filesystem tests preserve sibling sentinels and external symlink targets; reject
   symlinked parents/leaves, traversal, unowned custom directories and wrong receipts.
 - **The complete `VoxEngine` compiles for ARM64 iOS Simulator**, including native
@@ -98,7 +98,7 @@ model was loaded for these tests, and no merge or release occurred.
 
 ## Full regression checks
 
-The full local suite passes 267 Swift Testing cases. Focused Parakeet tests pass
+The full local suite passes 268 Swift Testing cases. Focused Parakeet tests pass
 with the strict cooperative executor. Bun clients/CLI/browser suites pass 61 tests
 with 8 opt-in integration skips. Documentation generation/check passes with the
 existing audit warnings. The real isolated private annotation and TTS fixtures

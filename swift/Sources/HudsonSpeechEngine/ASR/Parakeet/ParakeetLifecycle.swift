@@ -20,11 +20,19 @@ actor ParakeetOperations {
     private var exclusive = false
     private var installation: (id: UUID, task: Task<URL, Error>, progress: Observers)?
 
-    func withUse<T: Sendable>(_ operation: @Sendable () async throws -> T) async throws -> T {
+    func withUse<T: Sendable>(runtime: any ParakeetRuntime, _ operation: @Sendable () async throws -> T) async throws -> T {
         try Task.checkCancellation()
         guard !exclusive else { throw ParakeetLifecycleError.busy }
         let id = UUID(); users.insert(id); defer { users.remove(id) }
-        return try await operation()
+        await runtime.beginUse()
+        do {
+            let result = try await operation()
+            await runtime.endUse()
+            return result
+        } catch {
+            await runtime.endUse()
+            throw error
+        }
     }
     func withExclusive<T: Sendable>(_ operation: @Sendable () async throws -> T) async throws -> T {
         try Task.checkCancellation()

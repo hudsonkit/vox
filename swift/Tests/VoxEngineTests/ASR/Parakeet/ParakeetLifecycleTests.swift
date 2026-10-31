@@ -106,6 +106,20 @@ struct ParakeetLifecycleTests {
         #expect(await fixture.provider.models().first?.preloaded == false)
     }
 
+    @Test("Idle eviction cannot expire an admitted operation during file preparation")
+    func idleReservationSpansPreparation() async throws {
+        let fixture = try Fixture(); defer { fixture.remove() }
+        _ = try await fixture.provider.preload(modelId: "parakeet:v3") { _ in }
+        await fixture.runtime.beginUse() // same reservation taken by every provider operation
+        try await fixture.runtime.setIdleUnload(seconds: 0.01)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(fixture.witness.alive)
+        await #expect(throws: ParakeetLifecycleError.self) { try await fixture.provider.unload(modelId: "parakeet:v3") }
+        await fixture.runtime.endUse()
+        for _ in 0..<200 { if !fixture.witness.alive { break }; try await Task.sleep(for: .milliseconds(5)) }
+        #expect(!fixture.witness.alive)
+    }
+
     @Test("Residency unload is model-scoped and never steals a live lease")
     func scopedResidency() async throws {
         let slot = NativeASRResidency(), counter = Downloads()
@@ -126,6 +140,7 @@ private struct Fixture: Sendable {
     let store: ParakeetModelStore
     let provider: ParakeetProvider
     let factory: Factory
+    let runtime: ParakeetCoreMLRuntime
     let witness = Witness()
     let downloads: Downloads
     init(download: Pause? = nil, loading: Pause? = nil, inference: Pause? = nil) throws {
@@ -135,7 +150,7 @@ private struct Fixture: Sendable {
         factory = Factory(witness: witness, loading: loading, inference: inference)
         store = ParakeetModelStore(downloader: Downloader(recorder: downloads), preferredModelsRootDirectory: root.appendingPathComponent("models"))
         let factory = self.factory
-        let runtime = ParakeetCoreMLRuntime(loadSession: { _ in try await factory.make() }, observeEvent: { _ in })
+        runtime = ParakeetCoreMLRuntime(loadSession: { _ in try await factory.make() }, observeEvent: { _ in })
         provider = ParakeetProvider(store: store, runtime: runtime)
     }
     func remove() { try? FileManager.default.removeItem(at: root) }

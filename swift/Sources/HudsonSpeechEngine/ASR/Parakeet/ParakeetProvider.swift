@@ -64,7 +64,7 @@ public final class ParakeetProvider: @unchecked Sendable, ASRProvider {
     /// Download/validate only. Core ML load and priming belong to explicit preload.
     public func install(modelId: String, progress: @escaping @Sendable (ModelProgress) -> Void) async throws -> ASRModelInfo {
         let engine = try resolveEngine(modelId: modelId)
-        return try await engine.operations.withUse {
+        return try await engine.operations.withUse(runtime: engine.runtime) {
             _ = try await engine.operations.installed(engine.store, progress: progress)
             progress(ModelProgress(modelId: modelId, progress: 1, status: "installed"))
             return await self.modelInfo(for: engine)
@@ -72,7 +72,7 @@ public final class ParakeetProvider: @unchecked Sendable, ASRProvider {
     }
     public func preload(modelId: String, progress: @escaping @Sendable (ModelProgress) -> Void) async throws -> ASRModelInfo {
         let engine = try resolveEngine(modelId: modelId)
-        return try await engine.operations.withUse { try await self.ensureLoaded(engine: engine, progress: progress) }
+        return try await engine.operations.withUse(runtime: engine.runtime) { try await self.ensureLoaded(engine: engine, progress: progress) }
     }
     /// Read-only location of this engine's Vox-owned revision. Does not create files.
     public func modelDirectory(modelId: String) throws -> URL {
@@ -99,12 +99,12 @@ public final class ParakeetProvider: @unchecked Sendable, ASRProvider {
     /// Zero disables idle unloading. Does not cancel an admitted operation.
     public func setIdleUnload(modelId: String, seconds: Double) async throws {
         let engine = try resolveEngine(modelId: modelId)
-        try await engine.operations.withUse { try await engine.runtime.setIdleUnload(seconds: seconds) }
+        try await engine.operations.withUse(runtime: engine.runtime) { try await engine.runtime.setIdleUnload(seconds: seconds) }
     }
 
     public func transcribe(url: URL, modelId: String) async throws -> TranscriptionOutput {
         let engine = try resolveEngine(modelId: modelId)
-        return try await engine.operations.withUse { try await self.transcribe(url: url, engine: engine) }
+        return try await engine.operations.withUse(runtime: engine.runtime) { try await self.transcribe(url: url, engine: engine) }
     }
 
     private func transcribe(url: URL, engine: Engine) async throws -> TranscriptionOutput {
