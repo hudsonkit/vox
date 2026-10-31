@@ -7,6 +7,7 @@ public actor ExternalTTSProvider: TTSProvider {
     private let providerId: String
     private let command: [String]
     private let env: [String: String]?
+    private let supportsRequestCancellation: Bool
     private var transport: StdioTransport?
 
     private var crashCount: Int = 0
@@ -14,10 +15,11 @@ public actor ExternalTTSProvider: TTSProvider {
     private let maxCrashRestarts = 5
     private let stabilityWindow: TimeInterval = 60
 
-    public init(id: String, command: [String], env: [String: String]? = nil) {
+    public init(id: String, command: [String], env: [String: String]? = nil, supportsRequestCancellation: Bool = false) {
         self.providerId = id
         self.command = command
         self.env = env
+        self.supportsRequestCancellation = supportsRequestCancellation
     }
 
     deinit {
@@ -117,6 +119,7 @@ public actor ExternalTTSProvider: TTSProvider {
         }
 
         let result = try await transport.call(method: "synthesize", params: params)
+        try Task.checkCancellation()
         guard let modelId = result["modelId"] as? String else {
             throw ExternalTTSProviderError.invalidResponse("synthesize")
         }
@@ -175,7 +178,7 @@ public actor ExternalTTSProvider: TTSProvider {
         crashCount += 1
         log.info("Starting TTS provider \(self.providerId) (attempt \(self.crashCount)/\(self.maxCrashRestarts))")
 
-        let newTransport = StdioTransport(command: command, env: env)
+        let newTransport = StdioTransport(command: command, env: env, supportsRequestCancellation: supportsRequestCancellation)
         try newTransport.start()
         self.transport = newTransport
         lastStableTime = Date()

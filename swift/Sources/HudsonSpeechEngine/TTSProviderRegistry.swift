@@ -48,7 +48,8 @@ public actor TTSProviderRegistry: TTSProvider {
                 log.info("Registered builtin TTS provider: \(entry.id)")
             } else if entry.isExternal, let command = entry.command {
                 #if os(macOS)
-                provider = ExternalTTSProvider(id: entry.id, command: command, env: entry.env)
+                provider = ExternalTTSProvider(id: entry.id, command: command, env: entry.env,
+                    supportsRequestCancellation: entry.supportsRequestCancellation == true)
                 log.info("Registered external TTS provider: \(entry.id) → \(command.joined(separator: " "))")
                 #else
                 log.warning("External TTS providers unavailable on this platform: \(entry.id)")

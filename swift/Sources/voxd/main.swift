@@ -57,7 +57,8 @@ func defaultTTSConfig() -> ProvidersConfig {
                 id: "voxttsd",
                 kind: .tts,
                 command: command,
-                models: models
+                models: models,
+                supportsRequestCancellation: true
             )
         ])
     }

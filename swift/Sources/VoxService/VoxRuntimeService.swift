@@ -24,8 +24,7 @@ public final class VoxRuntimeService: @unchecked Sendable {
     private let preferencesLoader: @Sendable () -> VoxPreferences
     private let defaultSynthesisModelId: String
     private let annotationTasks = ConnectionRequestTasks()
-    private let inFlightSynthesisLock = NSLock()
-    private var inFlightSynthesisGenerates: [String: [String: Task<Void, Never>]] = [:]
+    private let synthesisTasks = ConnectionRequestTasks()
 
     public init(
         port: UInt16 = VoxDefaults.daemonPort,
@@ -89,6 +88,7 @@ public final class VoxRuntimeService: @unchecked Sendable {
 
     public func stop() {
         annotationTasks.cancelAll()
+        synthesisTasks.cancelAll()
         bridge.stop()
         Task { await streamingSessions.shutdown() }
         if socketPath != nil { privateRegistration?.invalidate(); privateRegistration = nil }
@@ -1025,17 +1025,21 @@ public final class VoxRuntimeService: @unchecked Sendable {
             guard let self else { return }
             let modelId = params?["modelId"] as? String
             let credentials = self.providerCredentials(from: params)
-            Task {
+            let connectionID = params?["_connectionID"] as? String ?? "unknown"
+            let (id, ticket) = self.synthesisTasks.reserve(connectionID: connectionID)
+            let task = Task {
+                defer { self.synthesisTasks.finish(connectionID: connectionID, id: id, ticket: ticket) }
                 do {
-                    let voices = try await self.performSynthesizeVoices(modelId: modelId,
-                        providerCredentials: credentials)
-                    reply([
-                        "voices": voices.map { $0.dictionaryValue() }
-                    ], nil)
+                    try Task.checkCancellation()
+                    let voices = try await self.performSynthesizeVoices(modelId: modelId, providerCredentials: credentials)
+                    try Task.checkCancellation()
+                    reply(["voices": voices.map { $0.dictionaryValue() }], nil)
                 } catch {
-                    reply(nil, error.localizedDescription)
+                    reply(nil, Task.isCancelled || error is CancellationError
+                          ? "request_cancelled:connection_closed" : error.localizedDescription)
                 }
             }
+            ticket.attach(task)
         }
 
         bridge.handle("synthesize.models") { [weak self] _, reply in
@@ -1076,15 +1080,16 @@ public final class VoxRuntimeService: @unchecked Sendable {
                 providerCredentials: providerCredentials
             )
 
-            let taskID = UUID().uuidString
+            let (taskID, ticket) = self.synthesisTasks.reserve(connectionID: connectionID)
             let task = Task { [weak self] in
                 guard let self else { return }
                 defer {
-                    self.finishInFlightSynthesisGenerate(connectionID: connectionID, taskID: taskID)
+                    self.synthesisTasks.finish(connectionID: connectionID, id: taskID, ticket: ticket)
                 }
                 let routeStartedAt = Date()
                 self.log.info("synthesize.generate started requestId=\(request.requestId) connectionId=\(connectionID) clientId=\(clientId) modelId=\(modelId) voiceId=\(voiceId ?? "default") textLength=\(text.count)")
                 do {
+                    try Task.checkCancellation()
                     let output = try await self.performSynthesizeGenerate(
                         request: request,
                         speechTimingRequest: speechTimingRequest
@@ -1129,7 +1134,7 @@ public final class VoxRuntimeService: @unchecked Sendable {
                     reply(nil, error.localizedDescription)
                 }
             }
-            self.registerInFlightSynthesisGenerate(task, connectionID: connectionID, taskID: taskID)
+            ticket.attach(task)
         }
 
         bridge.handle("transcribe.stream.status") { _, reply in
@@ -1644,42 +1649,9 @@ public final class VoxRuntimeService: @unchecked Sendable {
         }
     }
 
-    private func registerInFlightSynthesisGenerate(
-        _ task: Task<Void, Never>,
-        connectionID: String,
-        taskID: String
-    ) {
-        inFlightSynthesisLock.lock()
-        var tasks = inFlightSynthesisGenerates[connectionID] ?? [:]
-        tasks[taskID] = task
-        inFlightSynthesisGenerates[connectionID] = tasks
-        inFlightSynthesisLock.unlock()
-    }
-
-    private func finishInFlightSynthesisGenerate(connectionID: String, taskID: String) {
-        inFlightSynthesisLock.lock()
-        if var tasks = inFlightSynthesisGenerates[connectionID] {
-            tasks.removeValue(forKey: taskID)
-            inFlightSynthesisGenerates[connectionID] = tasks.isEmpty ? nil : tasks
-        }
-        inFlightSynthesisLock.unlock()
-    }
-
-    private func cancelInFlightSynthesisGenerates(connectionID: String) {
-        inFlightSynthesisLock.lock()
-        let tasks = inFlightSynthesisGenerates.removeValue(forKey: connectionID) ?? [:]
-        inFlightSynthesisLock.unlock()
-
-        guard !tasks.isEmpty else { return }
-        log.warning("Connection \(connectionID) closed, cancelling \(tasks.count) in-flight synthesize.generate request(s)")
-        for task in tasks.values {
-            task.cancel()
-        }
-    }
-
     private func handleDisconnect(connectionID: String) async {
         annotationTasks.cancel(connectionID: connectionID)
-        cancelInFlightSynthesisGenerates(connectionID: connectionID)
+        synthesisTasks.cancel(connectionID: connectionID)
 
         if let session = sessions.finish(connectionID: connectionID) {
             await recorder.cancel()

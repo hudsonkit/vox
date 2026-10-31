@@ -5,6 +5,24 @@ import VoxCore
 
 @Suite("Remote TTS providers", .serialized)
 struct RemoteTTSProviderTests {
+    @Test("OpenAI HTTP error bodies never reach caller or host telemetry")
+    func openAIHTTPErrorDiscardsReflectedCredentials() async throws {
+        let key = "openai-loan-fixture-secret", text = "private synthetic prompt"
+        for body in ["{\"error\":{\"message\":\"\(key) \(text)\"}}", "\(key) \(text)"] {
+            let provider = OpenAITTSProvider(env: ["OPENAI_API_KEY": ""], session:
+                MockHTTPURLProtocol.session(body: Data(body.utf8), statusCode: 401))
+            do {
+                _ = try await provider.synthesize(SynthesisRequest(text: text, modelId: "gpt-4o-mini-tts",
+                    providerCredentials: ["OPENAI_API_KEY": key]))
+                Issue.record("Expected HTTP failure")
+            } catch {
+                #expect(error.localizedDescription.contains("HTTP 401"))
+                #expect(!error.localizedDescription.contains(key))
+                #expect(!error.localizedDescription.contains(text))
+            }
+        }
+    }
+
     @Test("ElevenLabs request credentials win and explicit provider env fences ambient keys")
     func elevenCredentialPrecedenceAndIsolation() async throws {
         #expect(ElevenLabsTTSProvider.resolveAPIKey(providerCredentials: ["ELEVENLABS_API_KEY": " lent "],

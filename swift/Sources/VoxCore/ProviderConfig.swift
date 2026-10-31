@@ -34,6 +34,8 @@ public struct ProviderEntry: Codable, Sendable {
     public let command: [String]?
     public let models: [String]?
     public let env: [String: String]?
+    /// Opt-in JSON-RPC $/cancelRequest support; absent means legacy provider.
+    public let supportsRequestCancellation: Bool?
 
     public init(
         id: String,
@@ -41,7 +43,8 @@ public struct ProviderEntry: Codable, Sendable {
         builtin: Bool? = nil,
         command: [String]? = nil,
         models: [String]? = nil,
-        env: [String: String]? = nil
+        env: [String: String]? = nil,
+        supportsRequestCancellation: Bool? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -49,6 +52,7 @@ public struct ProviderEntry: Codable, Sendable {
         self.command = command
         self.models = models
         self.env = env
+        self.supportsRequestCancellation = supportsRequestCancellation
     }
 
     public var isBuiltin: Bool {

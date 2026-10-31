@@ -54,3 +54,8 @@
 - Scoped voice credentials forwarding is verified for bundled voxttsd; third-party external adapters must honor that protocol themselves. Lend only the selected provider key, not a whole credential store.
 
 - Parakeet batch words are grouped SentencePiece/whitespace spans after chunk merge, punctuation attached, min/max token bounds and min piece confidence. 80 ms TDT estimates, not forced alignment/calibrated word posterior; no fake missing-vocab labels or truncated alignment arrays.
+
+- External TTS cancellation opt-in: ProviderEntry.supportsRequestCancellation=true; stock voxd sets it for matching bundled voxttsd. Absent/false preserves legacy wire behavior, local cancellation only.
+- Internal notification: {jsonrpc:"2.0",method:"$/cancelRequest",params:{id:<numeric transport call ID>}}, no outer ID/ack. Not request UUID/model/client ID. Unknown IDs ignored, cancelled helper calls may reply -32800 request_cancelled; late host replies ignored. No process kill/restart.
+- Helper: dedicated bounded POSIX stdin reader (1 MiB frames), actor registry <=16 accepted tasks, concurrent HTTP/control processing, serialized output. Parent EOF cancels/drains. Host serializes writes and removes continuations once on cancellation/timeout. Extension not wired to external ASR.
+- OpenAI TTS HTTP errors now status-only, never vendor body; ephemeral default session, no-store. Existing logs untouched. scripts/test-private-tts.py verifies private same-user transport, scoped errors/keys and cancellation while another client's request succeeds on unchanged helper PID, no paid calls.

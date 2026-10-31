@@ -197,6 +197,31 @@ parameters. No inference-engine linkage is required. TTS inventories describe
 daemon-configured availability; supplying a key does not change global defaults
 or inventory. See [provider rules and output-format requirements](./providers.md).
 
+### TTS diagnostic privacy and cancellation
+
+OpenAI and ElevenLabs HTTP failures expose status only. Untrusted vendor error
+bodies are not included in service telemetry, provider errors or daemon logs.
+OpenAI's default session is ephemeral without cache, cookies or credential
+storage; synthesis requests use no-store. Previously persisted diagnostics are
+not rewritten by this change.
+
+Cancelling a `VoxDaemonClient.call` task closes that client connection and cancels
+its owned generation and authenticated voice-lookup tasks. Use a dedicated client
+connection for an independently cancellable operation. Other connections continue
+using the same helper. There is no public per-request `synthesize.generate`
+cancel RPC; `synthesize.cancel` still targets synthesis sessions.
+
+For the stock bundled `voxttsd`, cancellation propagates through the external
+provider to its matching helper task and HTTP request. The helper remains alive;
+unrelated requests are not cancelled. A transport timeout uses the same scoped
+cancellation. Closing HTTP does not guarantee vendor-side cancellation, retention
+or refund. Custom external TTS providers need explicit protocol support; see
+[provider cancellation](./providers.md#request-scoped-tts-cancellation).
+
+Build and deploy matching daemon/helper revisions together. The local fixture
+`python3 scripts/test-private-tts.py` exercises both vendors and simultaneous
+clients without paid calls. See the [verification report](./reports/tts-privacy-cancellation-2026-10-30.md).
+
 ## RPC Routes
 
 The runtime exposes these RPC routes:

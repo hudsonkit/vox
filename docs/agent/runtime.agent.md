@@ -83,3 +83,8 @@
 - Integration: `xcrun swift build --package-path swift --product voxd`; `python3 scripts/test-private-annotation.py`. Isolated private daemon, two model-free clients, loopback fixtures only. No paid calls or installed runtime changes. Native ASR unaffected.
 
 - Deepgram multilingual languages live on the selected alternative; preserve its list plus per-word words.language. Do not infer detected language from the list. Scribe per-word language is unsupported.
+
+- TTS privacy: OpenAI/ElevenLabs HTTP errors expose status only, never vendor bodies; OpenAI defaults ephemeral/no cache/cookies/credential storage, no-store requests. Old persisted logs are not rewritten.
+- Generation + authenticated voices use connection-owned tickets reserved before task launch. Client disconnect cancels only its own work. Separate client connections for independent cancellation; no public one-shot cancel RPC.
+- Stock bundled helper propagates task cancellation/transport timeout by numeric JSON-RPC ID through ExternalTTSProvider/StdioTransport to HTTP. Shared process and other calls survive. Custom TTS requires supportsRequestCancellation=true; absent/false cancels local wait only. Never kill shared provider to cancel one call.
+- Regression: scripts/test-private-tts.py, two model-free clients, stock private daemon/helper, loopback vendors only, reflected-key errors/non-retention, concurrent client A cancellation + B survival, unchanged helper PID, clean EOF. Real vendor stop/retention/refund not guaranteed. See reports/tts-privacy-cancellation-2026-10-30.md.

@@ -1128,6 +1128,31 @@ parameters. No inference-engine linkage is required. TTS inventories describe
 daemon-configured availability; supplying a key does not change global defaults
 or inventory. See [provider rules and output-format requirements](./providers.md).
 
+### TTS diagnostic privacy and cancellation
+
+OpenAI and ElevenLabs HTTP failures expose status only. Untrusted vendor error
+bodies are not included in service telemetry, provider errors or daemon logs.
+OpenAI's default session is ephemeral without cache, cookies or credential
+storage; synthesis requests use no-store. Previously persisted diagnostics are
+not rewritten by this change.
+
+Cancelling a `VoxDaemonClient.call` task closes that client connection and cancels
+its owned generation and authenticated voice-lookup tasks. Use a dedicated client
+connection for an independently cancellable operation. Other connections continue
+using the same helper. There is no public per-request `synthesize.generate`
+cancel RPC; `synthesize.cancel` still targets synthesis sessions.
+
+For the stock bundled `voxttsd`, cancellation propagates through the external
+provider to its matching helper task and HTTP request. The helper remains alive;
+unrelated requests are not cancelled. A transport timeout uses the same scoped
+cancellation. Closing HTTP does not guarantee vendor-side cancellation, retention
+or refund. Custom external TTS providers need explicit protocol support; see
+[provider cancellation](./providers.md#request-scoped-tts-cancellation).
+
+Build and deploy matching daemon/helper revisions together. The local fixture
+`python3 scripts/test-private-tts.py` exercises both vendors and simultaneous
+clients without paid calls. See the [verification report](./reports/tts-privacy-cancellation-2026-10-30.md).
+
 ## RPC Routes
 
 The runtime exposes these RPC routes:
@@ -2191,6 +2216,41 @@ Then select it via CLI or SDK by specifying the target model ID.
 Vox spawns the provider process on first use. It stays alive for the daemon's lifetime. If it crashes, Vox restarts it on the next request.
 
 Providers should be stateless between requests. The provider process can keep model weights in memory, but Vox assumes nothing about that state -- a crash and restart must not break anything.
+
+## Request-scoped TTS cancellation
+
+The stock daemon enables this extension for its matching bundled `voxttsd`.
+A compatible custom external TTS entry can opt in with
+`"supportsRequestCancellation": true`. Do not set it for an older helper or a
+provider that cannot cancel by transport ID. The field defaults to absent/false;
+legacy providers still support cancelling the local await, but remote work can
+continue. Cancellation never terminates the shared provider process.
+
+When an awaiting task cancels or its transport deadline expires, `StdioTransport`
+removes that pending call and optionally sends this JSON-RPC notification:
+
+```json
+{"jsonrpc":"2.0","method":"$/cancelRequest","params":{"id":17}}
+```
+
+`params.id` is the numeric JSON-RPC call ID, not the synthesis request UUID,
+client ID, model ID or voice ID. Notifications have no outer ID or acknowledgement.
+Unknown/completed IDs are ignored. The bundled helper cancels only that task and
+can return error code `-32800` / `request_cancelled`; the host ignores late replies
+for already-cancelled calls. Pending calls cannot resume twice.
+
+The helper admits at most 16 requests and rejects excess with a busy error. A
+bounded 1 MiB stdin frame reader runs on a dedicated thread, not MainActor or a
+cooperative executor. The reader continues servicing cancellation while synthesis
+awaits HTTP or AVFoundation. Parent EOF cancels and drains accepted tasks. Output
+lines and host request/cancel writes are serialized so simultaneous callers cannot
+interleave JSON frames. The host rejects oversized opted-in requests before sending;
+the helper drains an oversized frame without cancelling unrelated tasks. No request keys or prompt bodies are logged by this path.
+
+This extension is currently wired for external TTS, not the external ASR process
+protocol. Public daemon synthesis-session cancellation and native ASR residency
+are unchanged. HTTP cancellation cannot guarantee vendor-side cancellation or
+billing outcome.
 
 # SDK (Companion Client)
 
@@ -3654,6 +3714,11 @@ Source: docs/agent/providers.agent.md
 
 - Parakeet batch words are grouped SentencePiece/whitespace spans after chunk merge, punctuation attached, min/max token bounds and min piece confidence. 80 ms TDT estimates, not forced alignment/calibrated word posterior; no fake missing-vocab labels or truncated alignment arrays.
 
+- External TTS cancellation opt-in: ProviderEntry.supportsRequestCancellation=true; stock voxd sets it for matching bundled voxttsd. Absent/false preserves legacy wire behavior, local cancellation only.
+- Internal notification: {jsonrpc:"2.0",method:"$/cancelRequest",params:{id:<numeric transport call ID>}}, no outer ID/ack. Not request UUID/model/client ID. Unknown IDs ignored, cancelled helper calls may reply -32800 request_cancelled; late host replies ignored. No process kill/restart.
+- Helper: dedicated bounded POSIX stdin reader (1 MiB frames), actor registry <=16 accepted tasks, concurrent HTTP/control processing, serialized output. Parent EOF cancels/drains. Host serializes writes and removes continuations once on cancellation/timeout. Extension not wired to external ASR.
+- OpenAI TTS HTTP errors now status-only, never vendor body; ephemeral default session, no-store. Existing logs untouched. scripts/test-private-tts.py verifies private same-user transport, scoped errors/keys and cancellation while another client's request succeeds on unchanged helper PID, no paid calls.
+
 # Quickstart Facts
 
 Source: docs/agent/quickstart.agent.md
@@ -3762,6 +3827,11 @@ Source: docs/agent/runtime.agent.md
 - Integration: `xcrun swift build --package-path swift --product voxd`; `python3 scripts/test-private-annotation.py`. Isolated private daemon, two model-free clients, loopback fixtures only. No paid calls or installed runtime changes. Native ASR unaffected.
 
 - Deepgram multilingual languages live on the selected alternative; preserve its list plus per-word words.language. Do not infer detected language from the list. Scribe per-word language is unsupported.
+
+- TTS privacy: OpenAI/ElevenLabs HTTP errors expose status only, never vendor bodies; OpenAI defaults ephemeral/no cache/cookies/credential storage, no-store requests. Old persisted logs are not rewritten.
+- Generation + authenticated voices use connection-owned tickets reserved before task launch. Client disconnect cancels only its own work. Separate client connections for independent cancellation; no public one-shot cancel RPC.
+- Stock bundled helper propagates task cancellation/transport timeout by numeric JSON-RPC ID through ExternalTTSProvider/StdioTransport to HTTP. Shared process and other calls survive. Custom TTS requires supportsRequestCancellation=true; absent/false cancels local wait only. Never kill shared provider to cancel one call.
+- Regression: scripts/test-private-tts.py, two model-free clients, stock private daemon/helper, loopback vendors only, reflected-key errors/non-retention, concurrent client A cancellation + B survival, unchanged helper PID, clean EOF. Real vendor stop/retention/refund not guaranteed. See reports/tts-privacy-cancellation-2026-10-30.md.
 
 # SDK Facts
 

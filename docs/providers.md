@@ -662,3 +662,38 @@ Then select it via CLI or SDK by specifying the target model ID.
 Vox spawns the provider process on first use. It stays alive for the daemon's lifetime. If it crashes, Vox restarts it on the next request.
 
 Providers should be stateless between requests. The provider process can keep model weights in memory, but Vox assumes nothing about that state -- a crash and restart must not break anything.
+
+## Request-scoped TTS cancellation
+
+The stock daemon enables this extension for its matching bundled `voxttsd`.
+A compatible custom external TTS entry can opt in with
+`"supportsRequestCancellation": true`. Do not set it for an older helper or a
+provider that cannot cancel by transport ID. The field defaults to absent/false;
+legacy providers still support cancelling the local await, but remote work can
+continue. Cancellation never terminates the shared provider process.
+
+When an awaiting task cancels or its transport deadline expires, `StdioTransport`
+removes that pending call and optionally sends this JSON-RPC notification:
+
+```json
+{"jsonrpc":"2.0","method":"$/cancelRequest","params":{"id":17}}
+```
+
+`params.id` is the numeric JSON-RPC call ID, not the synthesis request UUID,
+client ID, model ID or voice ID. Notifications have no outer ID or acknowledgement.
+Unknown/completed IDs are ignored. The bundled helper cancels only that task and
+can return error code `-32800` / `request_cancelled`; the host ignores late replies
+for already-cancelled calls. Pending calls cannot resume twice.
+
+The helper admits at most 16 requests and rejects excess with a busy error. A
+bounded 1 MiB stdin frame reader runs on a dedicated thread, not MainActor or a
+cooperative executor. The reader continues servicing cancellation while synthesis
+awaits HTTP or AVFoundation. Parent EOF cancels and drains accepted tasks. Output
+lines and host request/cancel writes are serialized so simultaneous callers cannot
+interleave JSON frames. The host rejects oversized opted-in requests before sending;
+the helper drains an oversized frame without cancelling unrelated tasks. No request keys or prompt bodies are logged by this path.
+
+This extension is currently wired for external TTS, not the external ASR process
+protocol. Public daemon synthesis-session cancellation and native ASR residency
+are unchanged. HTTP cancellation cannot guarantee vendor-side cancellation or
+billing outcome.
