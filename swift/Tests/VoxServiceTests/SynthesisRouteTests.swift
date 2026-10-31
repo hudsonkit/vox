@@ -36,12 +36,14 @@ private actor CancellingTTSProvider: TTSProvider {
 private actor MockTTSProvider: TTSProvider {
     private let modelId: String
     private let voiceId: String
+    private let quality: TTSVoiceQuality?
     private var capturedRequest: SynthesisRequest?
     private var voiceCredentials: [String: String] = [:]
 
-    init(modelId: String = "mock-tts:v1", voiceId: String = "voice-mock") {
+    init(modelId: String = "mock-tts:v1", voiceId: String = "voice-mock", quality: TTSVoiceQuality? = nil) {
         self.modelId = modelId
         self.voiceId = voiceId
+        self.quality = quality
     }
 
     func models() async -> [TTSModelInfo] {
@@ -72,7 +74,8 @@ private actor MockTTSProvider: TTSProvider {
                 backend: "mock",
                 modelId: modelId ?? self.modelId,
                 available: true,
-                isDefault: true
+                isDefault: true,
+                quality: quality
             )
         ]
     }
@@ -224,6 +227,18 @@ struct SynthesisRouteTests {
         #expect(output.voiceId == "voice-mock")
         #expect(output.audioData == Data([0x52, 0x49, 0x46, 0x46]))
         #expect(output.metrics.synthesisMs == 12)
+    }
+
+    @Test("synthesize.voices preserves optional quality for wire serialization")
+    func synthesizeVoicesPreservesQuality() async throws {
+        let service = VoxRuntimeService(ttsEngine: TTSEngineManager(provider: MockTTSProvider(quality: .enhanced)))
+        let voices = try await service.performSynthesizeVoices(params: ["modelId": "mock-tts:v1"])
+        let voice = try #require(voices.first)
+        #expect(voice.quality == .enhanced)
+        let wire = voice.dictionaryValue()
+        #expect(wire["quality"] as? String == "enhanced")
+        #expect(wire["default"] as? Bool == true)
+        #expect(wire["id"] as? String == "voice-mock")
     }
 
     @Test("synthesize.voices helper returns the provider voice list")

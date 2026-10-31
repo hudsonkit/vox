@@ -186,6 +186,11 @@ public struct TTSModelInfo: Codable, Sendable, Equatable {
     }
 }
 
+/// Native voice quality reported by the platform, not inferred from voice names.
+public enum TTSVoiceQuality: String, Codable, Sendable, CaseIterable {
+    case standard, enhanced, premium
+}
+
 public struct TTSVoiceInfo: Codable, Sendable, Equatable {
     public let id: String
     public let name: String
@@ -194,6 +199,8 @@ public struct TTSVoiceInfo: Codable, Sendable, Equatable {
     public let modelId: String
     public let available: Bool
     public let isDefault: Bool
+    /// Nil means unknown or not reported by this backend, never "standard".
+    public let quality: TTSVoiceQuality?
 
     public init(
         id: String,
@@ -202,7 +209,8 @@ public struct TTSVoiceInfo: Codable, Sendable, Equatable {
         backend: String,
         modelId: String,
         available: Bool,
-        isDefault: Bool = false
+        isDefault: Bool = false,
+        quality: TTSVoiceQuality? = nil
     ) {
         self.id = id
         self.name = name
@@ -211,10 +219,43 @@ public struct TTSVoiceInfo: Codable, Sendable, Equatable {
         self.modelId = modelId
         self.available = available
         self.isDefault = isDefault
+        self.quality = quality
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, language, backend, modelId, available, isDefault, quality
+        case wireDefault = "default"
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        language = try c.decodeIfPresent(String.self, forKey: .language)
+        backend = try c.decode(String.self, forKey: .backend)
+        modelId = try c.decode(String.self, forKey: .modelId)
+        available = try c.decode(Bool.self, forKey: .available)
+        // Preserve older Swift archives as well as the existing RPC "default" key.
+        isDefault = try c.decodeIfPresent(Bool.self, forKey: .isDefault)
+            ?? c.decode(Bool.self, forKey: .wireDefault)
+        // Newer platform/wire values must remain unknown to older clients.
+        quality = (try c.decodeIfPresent(String.self, forKey: .quality)).flatMap(TTSVoiceQuality.init(rawValue:))
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(name, forKey: .name)
+        try c.encodeIfPresent(language, forKey: .language)
+        try c.encode(backend, forKey: .backend)
+        try c.encode(modelId, forKey: .modelId)
+        try c.encode(available, forKey: .available)
+        try c.encode(isDefault, forKey: .isDefault)
+        try c.encodeIfPresent(quality, forKey: .quality)
     }
 
     public func dictionaryValue() -> [String: Any] {
-        [
+        var result: [String: Any] = [
             "id": id,
             "name": name,
             "language": language ?? NSNull(),
@@ -223,6 +264,8 @@ public struct TTSVoiceInfo: Codable, Sendable, Equatable {
             "available": available,
             "default": isDefault
         ]
+        if let quality { result["quality"] = quality.rawValue }
+        return result
     }
 }
 

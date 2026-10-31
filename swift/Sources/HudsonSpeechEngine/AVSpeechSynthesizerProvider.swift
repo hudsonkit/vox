@@ -41,9 +41,19 @@ public actor AVSpeechSynthesizerProvider: TTSProvider {
                     backend: "avspeech",
                     modelId: Self.modelID,
                     available: true,
-                isDefault: voice.identifier == fallbackID
+                    isDefault: voice.identifier == fallbackID,
+                    quality: Self.normalizedQuality(voice.quality)
                 )
             }
+        }
+    }
+
+    nonisolated static func normalizedQuality(_ quality: AVSpeechSynthesisVoiceQuality) -> TTSVoiceQuality? {
+        switch quality {
+        case .default: return .standard
+        case .enhanced: return .enhanced
+        case .premium: return .premium
+        @unknown default: return nil
         }
     }
 
