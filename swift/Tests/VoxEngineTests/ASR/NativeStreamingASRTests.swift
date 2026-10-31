@@ -45,6 +45,22 @@ private actor PipelineLoader {
 }
 
 struct NativeStreamingASRTests {
+  @Test("Inventory and warmup report the actual configured idle policy")
+  func idlePolicyInventory() async throws {
+    let loader = PipelineLoader()
+    let engine = NativeStreamingASR(
+      idleSeconds: 45, loadPipeline: { spec, _, _ in try await loader.load(spec) })
+    #expect(await engine.models().allSatisfy { $0.idleUnloadSeconds == 45 })
+    try await engine.setIdleUnload(seconds: 0)
+    let installed = try await engine.install(modelId: StreamingASRDefaults.modelId, progress: { _ in })
+    #expect(installed.idleUnloadSeconds == 0)
+    let ready = try await engine.preload(modelId: StreamingASRDefaults.modelId, progress: { _ in })
+    #expect(ready.idleUnloadSeconds == 0)
+    #expect(await engine.status().idleUnloadSeconds == 0)
+    #expect(await engine.models().allSatisfy { $0.idleUnloadSeconds == 0 })
+    try await engine.unload()
+  }
+
   @Test("Concurrent explicit warmups join one install/load/prime flight")
   func serializedWarmup() async throws {
     let loader = PipelineLoader()

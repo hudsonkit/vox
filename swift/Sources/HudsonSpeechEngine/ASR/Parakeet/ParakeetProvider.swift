@@ -243,7 +243,8 @@ public final class ParakeetProvider: @unchecked Sendable, ASRProvider {
             installed: engine.store.isInstalled(),
             preloaded: snapshot.preloaded,
             available: engine.runtime.isAvailable,
-            computePlacement: snapshot.placement
+            computePlacement: snapshot.placement,
+            idleUnloadSeconds: snapshot.idleUnloadSeconds
         )
     }
 }

@@ -32,7 +32,7 @@
 - Native ASR requires Apple Silicon, macOS 14.4 / iOS 17.4 for compute-plan verification.
 - Default live id: StreamingASRDefaults.modelId; file default: parakeet:v3, pinned 7dd20fe (August 19 conversion).
 - Models/preload surfaces include planned computePlacement; streaming status exposes residency and owner.
-- CoreML streaming installation is disk-only; preload explicitly loads/primes; idle unload default 60 s.
+- CoreML streaming installation is disk-only; preload explicitly loads/primes; idle unload default macOS 900 s / iOS 60 s; native inventory exposes actual idleUnloadSeconds.
 - Batch and streaming share one process-wide native model slot; multiple app processes use one authenticated private Unix host.
 
 - Current live default: nemotron:unified-560ms (Nemotron Labs Unified, Oct 28 conversion bd13ddd); 160 ms stride + 400 ms right context, buffered re-encode, not encoder-cache streaming.

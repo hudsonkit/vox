@@ -715,7 +715,7 @@ let installed = try await batch.install(modelId: "parakeet:v3") { event in
 let ready = try await batch.preload(modelId: "parakeet:v3") { event in
     print(event.status, event.progress)         // load, ANE placement check, priming
 }
-try await batch.setIdleUnload(modelId: "parakeet:v3", seconds: 60)
+try await batch.setIdleUnload(modelId: "parakeet:v3", seconds: StreamingASRDefaults.idleUnloadSeconds)
 // The app owns capture and provides a finalized audio file to batch.transcribe.
 let unloaded = try await batch.unload(modelId: "parakeet:v3")
 let deleted = try await batch.deleteModel(modelId: "parakeet:v3")
@@ -743,8 +743,10 @@ location lookup never create a model or compile on CPU to validate files.
   to settle, then retry. Same-model installation and warmup are single-flight;
   cancelling a waiter does not stop another owner's shared download/load.
 - `setIdleUnload(modelId:seconds:)` is process/model-scoped, including other owners
-  of the shared runtime. Default is 60 s, optionally configured by
-  `VOX_ASR_IDLE_SECONDS`; zero disables idle eviction. Invalid values throw.
+  of the shared runtime. Default is 900 s on macOS and 60 s on iOS, optionally
+  configured by `VOX_ASR_IDLE_SECONDS`; zero explicitly disables idle eviction.
+  The setter rejects invalid values. Native inventory includes the actual
+  `ASRModelInfo.idleUnloadSeconds`; this is not a promise of fast reload.
   Idle eviction never interrupts active operations. Cold preparation must remain
   visible in app UI; do not silently pin models to hide startup cost.
 - Use `modelDirectory(modelId:)` for display or inspection, not caller-owned
@@ -1006,7 +1008,7 @@ print(final.text, final.words)
 
 `preload(modelId:directory:language:progress:)` can use an explicitly supplied offline model bundle. Without a directory, preload installs missing assets. Installation alone is available through `install(modelId:progress:)` and does not instantiate models. Warmups for the same model join one flight. Start requires a ready model and never performs warmup.
 
-The runtime has one active owner and one loaded native ASR model per process. Batch Parakeet and streaming share that residency slot. Idle unload defaults to 60 seconds; call `setIdleUnload(seconds:)` to configure it. Call `status()` to inspect the loaded model, planned encoder device assignment, and owner. Word timings are approximate RNNT emission frames. See [Native PCM streaming](./runtime.md#native-pcm-streaming) for endpoint semantics and lifecycle limits.
+The runtime has one active owner and one loaded native ASR model per process. Batch Parakeet and streaming share that residency slot. Idle unload defaults to 900 seconds on macOS and 60 seconds on iOS; call `setIdleUnload(seconds:)` to configure it. A model switch still replaces the one resident model. The desktop window reduces eviction churn, not Core ML compiler latency; see the [idle/reload investigation](./reports/idle-reload-2026-10-30.md). Call `status()` to inspect the loaded model, planned encoder device assignment, and owner. Word timings are approximate RNNT emission frames. See [Native PCM streaming](./runtime.md#native-pcm-streaming) for endpoint semantics and lifecycle limits.
 
 For several app processes, deliberately use one `VoxRuntimeService` host or `voxd` over the authenticated private Unix transport. Each app sends PCM using the `transcribe.stream.*` routes. Do not embed a separate model in every app when the product intends shared residency.
 
@@ -1530,7 +1532,11 @@ After load, Vox reads `MLComputePlan` with `.cpuAndNeuralEngine`. Diagnostics ex
 
 The native ASR slot is process-wide and shared by batch Parakeet and streaming providers. Model switching unloads the previous model before loading another. An active session or batch inference holds an exclusive lease. Warmup is serialized; same-model streaming warmups join one flight. Installation validation checks files and byte counts without loading or compiling models.
 
-Idle models unload after 60 seconds. Set `VOX_ASR_IDLE_SECONDS` before starting the host to change this timeout; `0` disables eviction. Embedded streaming callers can also call `setIdleUnload(seconds:)`. Active sessions are not evicted. Preload again after an idle unload. `transcribe.stream.status` and `models.list` expose current residency and planned placement. Streaming telemetry preserves `clientId`, `route: "transcribe.streaming"`, and `modelId`.
+Native ASR idle unload defaults to **900 seconds on macOS** and **60 seconds on iOS**. Set `VOX_ASR_IDLE_SECONDS` before starting the host to override it; `0` explicitly disables eviction. Invalid or negative environment values use the platform default. Embedded streaming callers can also call `setIdleUnload(seconds:)`; Parakeet has a model-scoped setter. Active operations are not evicted. One native residency slot still spans batch and streaming; selecting a different model can require cold preparation even inside the idle window.
+
+The bounded desktop window avoids a 60-second eviction between nearby dictations. It does not fix Core ML compilation stalls or guarantee a fast reload. A normal-UI test observed a 106-second first preparation and a second, still-pending ANE load after more than 10 minutes. See the [idle/reload investigation](./reports/idle-reload-2026-10-30.md) before making startup or memory claims. Show explicit prepare progress and propagate the same cold-load deadline through each app/XPC/RPC layer. A client timeout is not proof that an OS compiler operation stopped.
+
+Preload again after eviction. `transcribe.stream.status` and native entries in `models.list` expose the actual configured `idleUnloadSeconds`, residency and planned placement. Core ML load logs separate component `model-load` from encoder `compute-plan`, with start/completion/failure, attempt and elapsed milliseconds. They do not log file paths, request content, credentials or underlying error bodies. Streaming telemetry preserves `clientId`, `route: "transcribe.streaming"`, and `modelId`.
 
 # Models and plugins
 
@@ -1575,7 +1581,7 @@ Apple SpeechTranscriber is registered by the default daemon, so selecting its mo
 
 Catalog `capabilities.liveTranscription` describes the Vox surface, not just the upstream model. Native `coreml-streaming` models expose model-backed partials through `NativeStreamingASR.shared` and the app-captured `transcribe.stream.*` routes. Other file-only providers retain `liveTranscription=false`. The older daemon-microphone `transcribe.startSession` flow still transcribes after recording stops.
 
-Native streaming requires Apple Silicon and macOS 14.4 / iOS 17.4, so Vox can verify encoder placement with `MLComputePlan`. Install and preload explicitly. One process-wide native ASR slot serves batch and streaming; idle models unload after a configurable timeout. See [Native PCM streaming](./runtime.md#native-pcm-streaming) for ownership, backpressure, timestamps, and endpoint semantics. `parakeet:v3` remains the default file model on the pinned August 19 conversion.
+Native streaming requires Apple Silicon and macOS 14.4 / iOS 17.4, so Vox can verify encoder placement with `MLComputePlan`. Install and preload explicitly. One process-wide native ASR slot serves batch and streaming; idle models unload after a configurable timeout (macOS 900 s / iOS 60 s by default). Native inventory reports the actual `idleUnloadSeconds`. See [Native PCM streaming](./runtime.md#native-pcm-streaming) for ownership, backpressure, timestamps, and endpoint semantics. `parakeet:v3` remains the default file model on the pinned August 19 conversion.
 
 Vox does not ship Intel support. Local runtime entries are marked `architectures: ["arm64"]`. Audio conversion for native model inputs uses platform or provider libraries; do not add hand-written sample-rate conversion or denoising code to a model adapter.
 
@@ -3613,7 +3619,7 @@ A packaged app does not fall back to a developer build directory.
 - `append(sessionId:clientId:samples:)` -> [StreamingASRUpdate]; 1–16000 finite mono 16 kHz float32 samples, await each call.
 - `finish(sessionId:clientId:)` flushes -> final update; cancel discards.
 - Cumulative text, approximate RNNT words, explicit endpointSource; endpoints do not auto-stop.
-- Process-wide residency shared with batch; idle unload 60 s, configurable; preload again after eviction.
+- Process-wide residency shared with batch; idle unload macOS 900 s / iOS 60 s, configurable; native ASRModelInfo.idleUnloadSeconds reports the actual value. Preload again after eviction or model switch; bounded desktop retention does not fix compiler stalls.
 - `status()` exposes actual planned encoder placement from MLComputePlan, not requested computeUnits or a hardware trace.
 - Several app processes intentionally share one voxd private authenticated Unix endpoint; do not load separate engines per app.
 
@@ -3625,7 +3631,7 @@ A packaged app does not fall back to a developer build directory.
 - unload(modelId:) async throws -> ASRModelInfo releases actual shared Session/model closures, not just a provider reference. Metadata actors remain cached. Snapshot preloaded=false, placement=nil; other providers see it. Not an OS cache/RSS purge.
 - deleteModel(modelId:) async throws -> ASRModelInfo unloads then deletes only selected Vox-owned revision, no siblings/root/FluidAudio/system caches. Missing directory idempotent; filesystem failure may leave partial deletion + unloaded runtime, so refresh status.
 - Both reject admitted install/warmup/file-preparation/inference via ParakeetLifecycleError.busy; no stealing leases. Reservations are process-local, not cross-process store locks. Mac shared apps still use voxd.
-- setIdleUnload(modelId:seconds:): finite nonnegative seconds, zero disables; production default 60 s, env VOX_ASR_IDLE_SECONDS. Shared process/model scope. Idle cannot interrupt active runtime work.
+- setIdleUnload(modelId:seconds:): finite nonnegative seconds, zero disables; production default macOS 900 s / iOS 60 s, env VOX_ASR_IDLE_SECONDS. Native ASRModelInfo reports actual idleUnloadSeconds. Shared process/model scope. Idle cannot interrupt active runtime work.
 - Store deletion: descriptor-relative no-follow walk below trusted Vox home, receipts bind model/repo/revision; known built-in legacy layouts allowed, unknown custom unreceipted nonempty directories/alias receipts rejected. Do not hardcode cache manifests in callers.
 - Cached engine conversion is process-selected; catalog refresh does not hot-swap it. Restart for conversion updates.
 - examples/parakeet-lifecycle public native consumer compiles for ARM64 iOS Simulator in CI (entire VoxEngine, not only VoxClient). Simulator available=false; hardware ANE requires iOS17.4+/macOS14.4+. No iOS device footprint/placement/accuracy claimed.
@@ -3685,7 +3691,7 @@ Source: docs/agent/models.agent.md
 - Native ASR requires Apple Silicon, macOS 14.4 / iOS 17.4 for compute-plan verification.
 - Default live id: StreamingASRDefaults.modelId; file default: parakeet:v3, pinned 7dd20fe (August 19 conversion).
 - Models/preload surfaces include planned computePlacement; streaming status exposes residency and owner.
-- CoreML streaming installation is disk-only; preload explicitly loads/primes; idle unload default 60 s.
+- CoreML streaming installation is disk-only; preload explicitly loads/primes; idle unload default macOS 900 s / iOS 60 s; native inventory exposes actual idleUnloadSeconds.
 - Batch and streaming share one process-wide native model slot; multiple app processes use one authenticated private Unix host.
 
 - Current live default: nemotron:unified-560ms (Nemotron Labs Unified, Oct 28 conversion bd13ddd); 160 ms stride + 400 ms right context, buffered re-encode, not encoder-cache streaming.
@@ -3872,7 +3878,8 @@ Source: docs/agent/runtime.agent.md
 - One acknowledged packet in flight; no uncertain append retries; reconnect means new session.
 - Shared native model slot spans batch and streaming; exclusive active lease; unload previous before switching.
 - MLComputePlan verifies ANE compute placement after load, retries once, fails closed; planned placement, not execution trace.
-- Idle unload default 60 s; VOX_ASR_IDLE_SECONDS=0 disables; preload after eviction.
+- Native idle unload default macOS 900 s / iOS 60 s; VOX_ASR_IDLE_SECONDS overrides, explicit 0 disables. Native models.list entries expose actual idleUnloadSeconds; preload again after eviction. One slot and active-work protections unchanged.
+- Desktop retention reduces eviction churn, not compiler latency. CoreML load stage logs split component model-load and encoder compute-plan (started/completed/failed, attempt, elapsedMs); no raw error bodies. Same-model reload stall remains unproven fixed; see reports/idle-reload-2026-10-30.md.
 - Private Unix transport is intentional cross-process mode for Talkie and other app processes.
 
 - Standalone voxd --private: default ~/.vox/voxd.sock, fresh system-random 256-bit token, no TCP listener. VOX_SOCKET_PATH overrides path; optional explicit VOX_AUTH_TOKEN overrides token. No token in argv, process env or launchd plist is needed.

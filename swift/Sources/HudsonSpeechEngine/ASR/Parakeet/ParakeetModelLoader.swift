@@ -39,20 +39,28 @@ struct ParakeetModelLoader: Sendable {
 
     func loadModels(from directory: URL) async throws -> ParakeetLoadedModels {
         let urls = modelURLs(in: directory)
-        let preprocessor = try MLModel(
-            contentsOf: urls.preprocessor,
-            configuration: modelConfiguration(computeUnits: .cpuOnly)
-        )
+        let preprocessor = try ASRLoadStage(modelId: manifest.modelId, component: "preprocessor", phase: "model-load").sync {
+            try MLModel(
+                contentsOf: urls.preprocessor,
+                configuration: modelConfiguration(computeUnits: .cpuOnly)
+            )
+        }
         let (encoder, placement) = try await CoreMLPlacement.loadEncoder(url: urls.encoder, modelId: manifest.modelId)
-        let decoder = try MLModel(
-            contentsOf: urls.decoder,
-            configuration: modelConfiguration(computeUnits: .cpuAndNeuralEngine)
-        )
-        let joint = try MLModel(
-            contentsOf: urls.joint,
-            configuration: modelConfiguration(computeUnits: .cpuAndNeuralEngine)
-        )
-        let vocabulary = try ParakeetVocabulary.load(from: urls.vocabulary)
+        let decoder = try ASRLoadStage(modelId: manifest.modelId, component: "decoder", phase: "model-load").sync {
+            try MLModel(
+                contentsOf: urls.decoder,
+                configuration: modelConfiguration(computeUnits: .cpuAndNeuralEngine)
+            )
+        }
+        let joint = try ASRLoadStage(modelId: manifest.modelId, component: "joint", phase: "model-load").sync {
+            try MLModel(
+                contentsOf: urls.joint,
+                configuration: modelConfiguration(computeUnits: .cpuAndNeuralEngine)
+            )
+        }
+        let vocabulary = try ASRLoadStage(modelId: manifest.modelId, component: "vocabulary", phase: "read").sync {
+            try ParakeetVocabulary.load(from: urls.vocabulary)
+        }
         let configuration = modelConfiguration(computeUnits: .cpuAndNeuralEngine)
 
         return ParakeetLoadedModels(

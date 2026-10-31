@@ -63,8 +63,7 @@ actor ParakeetCoreMLRuntime: ParakeetRuntime {
         }
         self.observeEvent = { _ in }
         self.managesResidency = true
-        let configured = ProcessInfo.processInfo.environment["VOX_ASR_IDLE_SECONDS"].flatMap(Double.init) ?? StreamingASRDefaults.idleUnloadSeconds
-        self.idleSeconds = configured.isFinite && configured >= 0 ? configured : StreamingASRDefaults.idleUnloadSeconds
+        self.idleSeconds = StreamingASRDefaults.resolvedIdleUnloadSeconds(environment: ProcessInfo.processInfo.environment)
     }
 
     /// Replaces Core ML work while exercising the production runtime lifecycle.
@@ -248,7 +247,7 @@ actor ParakeetCoreMLRuntime: ParakeetRuntime {
         scheduleIdle()
     }
 
-    func snapshot() async -> ParakeetRuntimeSnapshot { ParakeetRuntimeSnapshot(preloaded: session != nil, placement: session?.placement) }
+    func snapshot() async -> ParakeetRuntimeSnapshot { ParakeetRuntimeSnapshot(preloaded: session != nil, placement: session?.placement, idleUnloadSeconds: idleSeconds) }
     func computePlacement() async -> CoreMLPlacement? { session?.placement }
     private func evict() {
         let hadSession = session != nil
@@ -257,6 +256,7 @@ actor ParakeetCoreMLRuntime: ParakeetRuntime {
     }
     private func evictIfIdle() {
         guard !unloading, operationReservations == 0, activeTranscriptions == 0, loadFlight == nil else { return }
+        log.info("Parakeet idle eviction model=\(modelId) idleUnloadSeconds=\(idleSeconds)")
         evict()
     }
     private func scheduleIdle() {

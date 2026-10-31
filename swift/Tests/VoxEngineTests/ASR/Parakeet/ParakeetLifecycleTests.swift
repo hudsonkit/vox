@@ -95,12 +95,14 @@ struct ParakeetLifecycleTests {
     @Test("Parakeet idle timeout is configurable without pretending to purge Core ML system caches")
     func idleUnload() async throws {
         let fixture = try Fixture(); defer { fixture.remove() }
+        #expect(await fixture.provider.models().first?.idleUnloadSeconds == 0) // injected runtime
         try await fixture.provider.setIdleUnload(modelId: "parakeet:v3", seconds: 0)
         _ = try await fixture.provider.preload(modelId: "parakeet:v3") { _ in }
         try await Task.sleep(for: .milliseconds(40))
         #expect(fixture.witness.alive)
         await #expect(throws: ParakeetLifecycleError.self) { try await fixture.provider.setIdleUnload(modelId: "parakeet:v3", seconds: .nan) }
         try await fixture.provider.setIdleUnload(modelId: "parakeet:v3", seconds: 0.01)
+        #expect(await fixture.provider.models().first?.idleUnloadSeconds == 0.01)
         for _ in 0..<200 { if !fixture.witness.alive { break }; try await Task.sleep(for: .milliseconds(5)) }
         #expect(!fixture.witness.alive)
         #expect(await fixture.provider.models().first?.preloaded == false)

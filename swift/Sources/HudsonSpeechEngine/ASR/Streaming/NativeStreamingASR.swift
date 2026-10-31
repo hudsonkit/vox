@@ -26,11 +26,7 @@ public actor NativeStreamingASR: ASRProvider {
     loadPipeline = { try await StreamingCoreMLPipeline.load(spec: $0, directory: $1, language: $2) }
     ensureInstalled = { try await StreamingModelStore(spec: $0).install(progress: $1) }
     managesResidency = true
-    let configured =
-      ProcessInfo.processInfo.environment["VOX_ASR_IDLE_SECONDS"].flatMap(Double.init)
-      ?? StreamingASRDefaults.idleUnloadSeconds
-    idleSeconds =
-      configured.isFinite && configured >= 0 ? configured : StreamingASRDefaults.idleUnloadSeconds
+    idleSeconds = StreamingASRDefaults.resolvedIdleUnloadSeconds(environment: ProcessInfo.processInfo.environment)
   }
 
   /// Test seam: use the production lifecycle without downloading or compiling models.
@@ -69,7 +65,7 @@ public actor NativeStreamingASR: ASRProvider {
         id: spec.id, name: spec.name, backend: "coreml-streaming",
         installed: StreamingModelStore(spec: spec).isInstalled(),
         preloaded: pipeline?.spec.id == spec.id, available: Self.available,
-        computePlacement: pipeline?.spec.id == spec.id ? pipeline?.placement : nil)
+        computePlacement: pipeline?.spec.id == spec.id ? pipeline?.placement : nil, idleUnloadSeconds: idleSeconds)
     }
   }
 
@@ -125,7 +121,7 @@ public actor NativeStreamingASR: ASRProvider {
         return ASRModelInfo(
           id: modelId, name: spec.name, backend: "coreml-streaming", installed: true,
           preloaded: pipeline?.spec.id == modelId, available: true,
-          computePlacement: pipeline?.spec.id == modelId ? pipeline?.placement : nil)
+          computePlacement: pipeline?.spec.id == modelId ? pipeline?.placement : nil, idleUnloadSeconds: idleSeconds)
       }
       // An install-only flight is not a preload: re-check readiness after joining.
       return try await warm(
@@ -137,7 +133,7 @@ public actor NativeStreamingASR: ASRProvider {
       scheduleIdle()
       return ASRModelInfo(
         id: modelId, name: spec.name, backend: "coreml-streaming", installed: true, preloaded: true,
-        available: true, computePlacement: pipeline?.spec.id == modelId ? pipeline?.placement : nil)
+        available: true, computePlacement: pipeline?.spec.id == modelId ? pipeline?.placement : nil, idleUnloadSeconds: idleSeconds)
     }
     let flightID = UUID()
     let task = Task {
@@ -154,7 +150,7 @@ public actor NativeStreamingASR: ASRProvider {
       return ASRModelInfo(
         id: modelId, name: spec.name, backend: "coreml-streaming", installed: true,
         preloaded: pipeline?.spec.id == modelId, available: true,
-        computePlacement: pipeline?.spec.id == modelId ? pipeline?.placement : nil)
+        computePlacement: pipeline?.spec.id == modelId ? pipeline?.placement : nil, idleUnloadSeconds: idleSeconds)
     } catch {
       if flight?.id == flightID { flight = nil }
       scheduleIdle()

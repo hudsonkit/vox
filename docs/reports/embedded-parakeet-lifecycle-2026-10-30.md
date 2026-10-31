@@ -1,5 +1,10 @@
 # Embedded Parakeet lifecycle verification
 
+> Historical default: the revision below used a 60-second idle default.
+> Benchmark configurations and measurements below are unchanged.
+> Current defaults are macOS 900 s / iOS 60 s; see the
+> [idle/reload investigation](./idle-reload-2026-10-30.md).
+
 ## Supported surface
 
 The iOS batch integration embeds `VoxCore` + `VoxEngine` and keeps a concrete

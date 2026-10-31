@@ -127,8 +127,11 @@ public struct ASRModelInfo: Codable, Sendable, Equatable {
     public let preloaded: Bool
     public let available: Bool
     public let computePlacement: CoreMLPlacement?
+    /// Actual configured native-model idle timeout; nil for providers without this capability.
+    /// Zero explicitly disables idle eviction.
+    public let idleUnloadSeconds: Double?
 
-    public init(id: String, name: String, backend: String, installed: Bool, preloaded: Bool, available: Bool, computePlacement: CoreMLPlacement? = nil) {
+    public init(id: String, name: String, backend: String, installed: Bool, preloaded: Bool, available: Bool, computePlacement: CoreMLPlacement? = nil, idleUnloadSeconds: Double? = nil) {
         self.id = id
         self.name = name
         self.backend = backend
@@ -136,10 +139,11 @@ public struct ASRModelInfo: Codable, Sendable, Equatable {
         self.preloaded = preloaded
         self.available = available
         self.computePlacement = computePlacement
+        self.idleUnloadSeconds = idleUnloadSeconds
     }
 
     public func dictionaryValue() -> [String: Any] {
-        [
+        var result: [String: Any] = [
             "id": id,
             "name": name,
             "backend": backend,
@@ -148,6 +152,8 @@ public struct ASRModelInfo: Codable, Sendable, Equatable {
             "available": available,
             "computePlacement": computePlacement?.dictionaryValue() ?? NSNull()
         ]
+        if let idleUnloadSeconds { result["idleUnloadSeconds"] = idleUnloadSeconds }
+        return result
     }
 }
 

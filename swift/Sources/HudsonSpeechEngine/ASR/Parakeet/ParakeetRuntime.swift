@@ -17,6 +17,7 @@ protocol ParakeetRuntime: Sendable {
 struct ParakeetRuntimeSnapshot: Sendable {
     let preloaded: Bool
     let placement: CoreMLPlacement?
+    let idleUnloadSeconds: Double
 }
 
 struct ParakeetInferenceResult: Sendable {

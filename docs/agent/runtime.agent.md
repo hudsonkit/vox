@@ -35,7 +35,8 @@
 - One acknowledged packet in flight; no uncertain append retries; reconnect means new session.
 - Shared native model slot spans batch and streaming; exclusive active lease; unload previous before switching.
 - MLComputePlan verifies ANE compute placement after load, retries once, fails closed; planned placement, not execution trace.
-- Idle unload default 60 s; VOX_ASR_IDLE_SECONDS=0 disables; preload after eviction.
+- Native idle unload default macOS 900 s / iOS 60 s; VOX_ASR_IDLE_SECONDS overrides, explicit 0 disables. Native models.list entries expose actual idleUnloadSeconds; preload again after eviction. One slot and active-work protections unchanged.
+- Desktop retention reduces eviction churn, not compiler latency. CoreML load stage logs split component model-load and encoder compute-plan (started/completed/failed, attempt, elapsedMs); no raw error bodies. Same-model reload stall remains unproven fixed; see reports/idle-reload-2026-10-30.md.
 - Private Unix transport is intentional cross-process mode for Talkie and other app processes.
 
 - Standalone voxd --private: default ~/.vox/voxd.sock, fresh system-random 256-bit token, no TCP listener. VOX_SOCKET_PATH overrides path; optional explicit VOX_AUTH_TOKEN overrides token. No token in argv, process env or launchd plist is needed.

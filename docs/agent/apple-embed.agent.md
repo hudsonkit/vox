@@ -135,7 +135,7 @@ A packaged app does not fall back to a developer build directory.
 - `append(sessionId:clientId:samples:)` -> [StreamingASRUpdate]; 1–16000 finite mono 16 kHz float32 samples, await each call.
 - `finish(sessionId:clientId:)` flushes -> final update; cancel discards.
 - Cumulative text, approximate RNNT words, explicit endpointSource; endpoints do not auto-stop.
-- Process-wide residency shared with batch; idle unload 60 s, configurable; preload again after eviction.
+- Process-wide residency shared with batch; idle unload macOS 900 s / iOS 60 s, configurable; native ASRModelInfo.idleUnloadSeconds reports the actual value. Preload again after eviction or model switch; bounded desktop retention does not fix compiler stalls.
 - `status()` exposes actual planned encoder placement from MLComputePlan, not requested computeUnits or a hardware trace.
 - Several app processes intentionally share one voxd private authenticated Unix endpoint; do not load separate engines per app.
 
@@ -147,7 +147,7 @@ A packaged app does not fall back to a developer build directory.
 - unload(modelId:) async throws -> ASRModelInfo releases actual shared Session/model closures, not just a provider reference. Metadata actors remain cached. Snapshot preloaded=false, placement=nil; other providers see it. Not an OS cache/RSS purge.
 - deleteModel(modelId:) async throws -> ASRModelInfo unloads then deletes only selected Vox-owned revision, no siblings/root/FluidAudio/system caches. Missing directory idempotent; filesystem failure may leave partial deletion + unloaded runtime, so refresh status.
 - Both reject admitted install/warmup/file-preparation/inference via ParakeetLifecycleError.busy; no stealing leases. Reservations are process-local, not cross-process store locks. Mac shared apps still use voxd.
-- setIdleUnload(modelId:seconds:): finite nonnegative seconds, zero disables; production default 60 s, env VOX_ASR_IDLE_SECONDS. Shared process/model scope. Idle cannot interrupt active runtime work.
+- setIdleUnload(modelId:seconds:): finite nonnegative seconds, zero disables; production default macOS 900 s / iOS 60 s, env VOX_ASR_IDLE_SECONDS. Native ASRModelInfo reports actual idleUnloadSeconds. Shared process/model scope. Idle cannot interrupt active runtime work.
 - Store deletion: descriptor-relative no-follow walk below trusted Vox home, receipts bind model/repo/revision; known built-in legacy layouts allowed, unknown custom unreceipted nonempty directories/alias receipts rejected. Do not hardcode cache manifests in callers.
 - Cached engine conversion is process-selected; catalog refresh does not hot-swap it. Restart for conversion updates.
 - examples/parakeet-lifecycle public native consumer compiles for ARM64 iOS Simulator in CI (entire VoxEngine, not only VoxClient). Simulator available=false; hardware ANE requires iOS17.4+/macOS14.4+. No iOS device footprint/placement/accuracy claimed.

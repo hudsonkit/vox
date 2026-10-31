@@ -74,7 +74,7 @@ let installed = try await batch.install(modelId: "parakeet:v3") { event in
 let ready = try await batch.preload(modelId: "parakeet:v3") { event in
     print(event.status, event.progress)         // load, ANE placement check, priming
 }
-try await batch.setIdleUnload(modelId: "parakeet:v3", seconds: 60)
+try await batch.setIdleUnload(modelId: "parakeet:v3", seconds: StreamingASRDefaults.idleUnloadSeconds)
 // The app owns capture and provides a finalized audio file to batch.transcribe.
 let unloaded = try await batch.unload(modelId: "parakeet:v3")
 let deleted = try await batch.deleteModel(modelId: "parakeet:v3")
@@ -102,8 +102,10 @@ location lookup never create a model or compile on CPU to validate files.
   to settle, then retry. Same-model installation and warmup are single-flight;
   cancelling a waiter does not stop another owner's shared download/load.
 - `setIdleUnload(modelId:seconds:)` is process/model-scoped, including other owners
-  of the shared runtime. Default is 60 s, optionally configured by
-  `VOX_ASR_IDLE_SECONDS`; zero disables idle eviction. Invalid values throw.
+  of the shared runtime. Default is 900 s on macOS and 60 s on iOS, optionally
+  configured by `VOX_ASR_IDLE_SECONDS`; zero explicitly disables idle eviction.
+  The setter rejects invalid values. Native inventory includes the actual
+  `ASRModelInfo.idleUnloadSeconds`; this is not a promise of fast reload.
   Idle eviction never interrupts active operations. Cold preparation must remain
   visible in app UI; do not silently pin models to hide startup cost.
 - Use `modelDirectory(modelId:)` for display or inspection, not caller-owned
@@ -365,6 +367,6 @@ print(final.text, final.words)
 
 `preload(modelId:directory:language:progress:)` can use an explicitly supplied offline model bundle. Without a directory, preload installs missing assets. Installation alone is available through `install(modelId:progress:)` and does not instantiate models. Warmups for the same model join one flight. Start requires a ready model and never performs warmup.
 
-The runtime has one active owner and one loaded native ASR model per process. Batch Parakeet and streaming share that residency slot. Idle unload defaults to 60 seconds; call `setIdleUnload(seconds:)` to configure it. Call `status()` to inspect the loaded model, planned encoder device assignment, and owner. Word timings are approximate RNNT emission frames. See [Native PCM streaming](./runtime.md#native-pcm-streaming) for endpoint semantics and lifecycle limits.
+The runtime has one active owner and one loaded native ASR model per process. Batch Parakeet and streaming share that residency slot. Idle unload defaults to 900 seconds on macOS and 60 seconds on iOS; call `setIdleUnload(seconds:)` to configure it. A model switch still replaces the one resident model. The desktop window reduces eviction churn, not Core ML compiler latency; see the [idle/reload investigation](./reports/idle-reload-2026-10-30.md). Call `status()` to inspect the loaded model, planned encoder device assignment, and owner. Word timings are approximate RNNT emission frames. See [Native PCM streaming](./runtime.md#native-pcm-streaming) for endpoint semantics and lifecycle limits.
 
 For several app processes, deliberately use one `VoxRuntimeService` host or `voxd` over the authenticated private Unix transport. Each app sends PCM using the `transcribe.stream.*` routes. Do not embed a separate model in every app when the product intends shared residency.

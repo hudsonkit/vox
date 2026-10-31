@@ -1,5 +1,10 @@
 # Native ASR selection, 2026-10-30
 
+> Historical default: the revision below used a 60-second idle default.
+> Benchmark configurations and measurements below are unchanged.
+> Current defaults are macOS 900 s / iOS 60 s; see the
+> [idle/reload investigation](./idle-reload-2026-10-30.md).
+
 ## Decision
 
 Use **Nemotron Labs Unified 0.6B**, `nemotron:unified-560ms`, as the live default. The selected int8 Core ML conversion was published October 28. It meets the M1 streaming budget, uses less process memory than the older Nemotron candidates, and had the lowest streaming WER in this smoke corpus. Keep **Parakeet TDT v3** as the file default, pinned to the August 19 conversion.

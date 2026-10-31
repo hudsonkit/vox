@@ -49,6 +49,7 @@ export interface DoctorReport {
 }
 
 export interface ModelInfo {
+  idleUnloadSeconds?: number | null;
   computePlacement?: CoreMLPlacement | null;
   id: string;
   name: string;

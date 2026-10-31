@@ -47,7 +47,20 @@ public struct StreamingASRUpdate: Codable, Sendable, Equatable {
 
 public enum StreamingASRDefaults {
   public static let modelId = "nemotron:unified-560ms"
+  // macOS measurements show ~100 MiB hot models but multi-minute, GiB-scale
+  // preparation during an observed reload after eviction. Keep a bounded 15-minute desktop hot window.
+  // iOS stays conservative until measured on physical devices.
+  #if os(macOS)
+  public static let idleUnloadSeconds: Double = 900
+  #else
   public static let idleUnloadSeconds: Double = 60
+  #endif
+  public static func resolvedIdleUnloadSeconds(environment: [String: String]) -> Double {
+    guard let raw = environment["VOX_ASR_IDLE_SECONDS"],
+          let seconds = Double(raw.trimmingCharacters(in: .whitespacesAndNewlines)),
+          seconds.isFinite, seconds >= 0 else { return idleUnloadSeconds }
+    return seconds
+  }
 }
 
 public struct NativeStreamingStatus: Codable, Sendable, Equatable {

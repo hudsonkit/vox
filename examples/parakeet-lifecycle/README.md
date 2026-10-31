@@ -15,7 +15,9 @@ linked. This is a library example, not an app launcher or a model download scrip
 - `modelDirectory()` is read-only location metadata, not permission to bypass safe
   deletion with a caller-owned recursive remove.
 - `setIdleUnload(seconds:)` is model-scoped; zero disables idle unloading. Default
-  production timeout is 60 s, optionally configured by `VOX_ASR_IDLE_SECONDS`.
+  production timeout is 900 s on macOS and 60 s on iOS, optionally configured by
+  `VOX_ASR_IDLE_SECONDS`. Inventory reports the actual `idleUnloadSeconds`.
+  The desktop window reduces eviction churn; it does not guarantee fast reload.
 
 The engine metadata actors remain shared; unload drops their actual loaded Session,
 not merely this actor's reference. Core ML system caches/RSS are not forcibly purged.
