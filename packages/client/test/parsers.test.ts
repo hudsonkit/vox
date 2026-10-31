@@ -107,8 +107,8 @@ describe("parseAttributedWordTimings", () => {
         { word: "" },
       ]),
     ).toEqual([
-      { word: "hello", start: 0.01, end: 0.2, confidence: 0.98, speakerId: "speaker-0" },
-      { word: "world", start: 0.21, end: 0.4, confidence: 0.91, speakerId: null },
+      { word: "hello", start: 0.01, end: 0.2, confidence: 0.98, logProbability: null, speakerConfidence: null, speakerId: "speaker-0" },
+      { word: "world", start: 0.21, end: 0.4, confidence: 0.91, logProbability: null, speakerConfidence: null, speakerId: null },
     ]);
   });
 });
@@ -126,4 +126,10 @@ describe("parseSpeakerSegments", () => {
       { speakerId: "speaker-1", start: 1.2, end: 2.1, confidence: null },
     ]);
   });
+});
+
+it("preserves absent annotation scores as null and rejects fabricated intervals", () => {
+  expect(parseAttributedWordTimings([{ word: "test", start: 0, end: 1, logProbability: -0.2 }])[0])
+    .toMatchObject({ confidence: null, logProbability: -0.2, speakerConfidence: null });
+  expect(() => parseAttributedWordTimings([{ word: "test" }])).toThrow("Invalid annotation interval");
 });

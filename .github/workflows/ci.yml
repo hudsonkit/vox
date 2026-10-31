@@ -21,6 +21,10 @@ jobs:
       - name: Root package exports the lightweight Swift client
         run: xcrun swift build --target VoxClient --jobs 3
       - run: xcrun swift test --package-path swift --jobs 3
+      - name: Private annotation routes use loopback fixtures, never paid vendors
+        run: |
+          xcrun swift build --package-path swift --product voxd --jobs 3
+          python3 scripts/test-private-annotation.py
       - name: Provider readers do not starve a strict cooperative executor
         env:
           LIBDISPATCH_COOPERATIVE_POOL_STRICT: '1'

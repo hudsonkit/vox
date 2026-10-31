@@ -151,8 +151,10 @@ export interface AttributedWordTiming {
   word: string;
   start: number;
   end: number;
-  confidence: number;
+  confidence: number | null;
   speakerId?: string | null;
+  logProbability?: number | null;
+  speakerConfidence?: number | null;
 }
 
 export interface FileTranscriptionResult {
@@ -179,6 +181,38 @@ export interface AnnotationMetrics {
   realtimeFactor: number;
 }
 
+export interface AnnotationAudioEvent {
+  label: string;
+  start: number;
+  end: number;
+  speakerId?: string | null;
+  logProbability?: number | null;
+}
+
+export interface AnnotationModelInfo {
+  id: string;
+  providerId: string;
+  nativeModelId: string;
+  remote: boolean;
+  capabilities: Record<string, boolean>;
+  requiresCredentials: string[];
+  unsupportedFields: string[];
+  maxInputBytes: number;
+}
+
+export interface AnnotationOptions {
+  modelId: string;
+  credentials?: Partial<Record<"ELEVENLABS_API_KEY" | "DEEPGRAM_API_KEY", string>>;
+  diarize?: boolean;
+  tagAudioEvents?: boolean;
+  languageCode?: string;
+  numSpeakers?: number;
+  /** Legacy custom-provider transcript alignment; cloud providers reject it. */
+  text?: string;
+  words?: WordTiming[];
+  timeoutMs?: number;
+}
+
 export interface FileAnnotationResult {
   modelId: string;
   text?: string;
@@ -186,6 +220,18 @@ export interface FileAnnotationResult {
   metrics?: AnnotationMetrics;
   words: AttributedWordTiming[];
   speakers: SpeakerSegment[];
+  providerId?: string | null;
+  providerRequestId?: string | null;
+  providerModelIds?: string[];
+  duration?: number | null;
+  durationSource?: string | null;
+  language?: string | null;
+  languageConfidence?: number | null;
+  languages?: string[];
+  audioEvents?: AnnotationAudioEvent[];
+  speakerSegmentsSource?: string | null;
+  unsupportedFields?: string[];
+  unavailableFields?: string[];
 }
 
 export interface TranscriptionMetrics {

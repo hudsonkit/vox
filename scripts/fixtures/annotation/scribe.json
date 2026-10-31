@@ -1,0 +1,34 @@
+{
+  "text": "Hello [laughter] world.",
+  "language_code": "eng",
+  "language_probability": 0.98,
+  "transcription_id": "scribe-request",
+  "words": [
+    {
+      "text": "Hello",
+      "type": "word",
+      "start": 0.1,
+      "end": 0.4,
+      "speaker_id": "speaker_2",
+      "logprob": -0.2
+    },
+    {
+      "text": " ",
+      "type": "spacing"
+    },
+    {
+      "text": "[laughter]",
+      "type": "audio_event",
+      "start": 0.5,
+      "end": 0.7,
+      "speaker_id": "speaker_2"
+    },
+    {
+      "text": "world.",
+      "type": "word",
+      "start": 0.8,
+      "end": 1.2,
+      "speaker_id": "speaker_7"
+    }
+  ]
+}

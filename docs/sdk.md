@@ -57,7 +57,8 @@ interface VoxClientSurface {
   startWarmup(modelId?: string): Promise<unknown>;
   scheduleWarmup(modelId?: string, delayMs?: number): Promise<unknown>;
   transcribeFile(path: string, modelId?: string): Promise<FileTranscriptionResult>;
-  annotateFile(path: string, options?: AnnotationOptions): Promise<FileAnnotationResult>;
+  listAnnotationModels(): Promise<AnnotationModelInfo[]>;
+  annotateFile(path: string, options: AnnotationOptions): Promise<FileAnnotationResult>;
   synthesize(text: string, options?: SynthesisOptions): Promise<SynthesisResult>;
   getLiveSessionStatus(): Promise<LiveSessionStatus | null>;
   cancelLiveSession(sessionId?: string): Promise<{ cancelled: boolean; sessionId: string }>;
@@ -158,3 +159,5 @@ On the daemon side, set `VOX_PORT` or `VOX_HOST` environment variables to overri
 Call `preloadModel(modelId)` explicitly, then `startPCMStream(modelId)`. Feed mono 16 kHz `Float32Array` packets with `appendPCMStream(sessionId, sequence, samples)`. Each packet contains 1–16000 finite samples. Await the acknowledgement and use its `nextSequence` before sending another packet. Read cumulative text, approximate word timings, and endpoint notifications from `updates`.
 
 Call `finishPCMStream(sessionId)` to flush and return the final transcript. Call `cancelPCMStream(sessionId)` to discard pending audio and text. `nativeStreamingStatus()` exposes residency, ownership, and the encoder's planned ANE/CPU placement. An endpoint notification does not implicitly finish a session. Disconnect cancels ownership; reconnect requires a new session. See the [wire contract](./runtime.md#pcm-wire-contract).
+
+Cloud annotation requires an explicit model and request-scoped vendor credential. See [file annotation](./runtime.md#file-annotation) for options, nullable evidence, upload limits and cancellation. `AnnotationOptions.timeoutMs` defaults to 3,600,000 ms.

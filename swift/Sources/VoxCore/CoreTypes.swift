@@ -299,7 +299,7 @@ public struct WordTiming: Codable, Sendable, Equatable {
     }
 }
 
-public struct SpeakerSegment: Sendable, Equatable {
+public struct SpeakerSegment: Codable, Sendable, Equatable {
     public let speakerId: String
     public let start: Double
     public let end: Double
@@ -322,25 +322,31 @@ public struct SpeakerSegment: Sendable, Equatable {
     }
 }
 
-public struct AttributedWordTiming: Sendable, Equatable {
+public struct AttributedWordTiming: Codable, Sendable, Equatable {
     public let word: String
     public let start: Double
     public let end: Double
-    public let confidence: Float
+    public let confidence: Float?
+    public let logProbability: Double?
+    public let speakerConfidence: Float?
     public let speakerId: String?
 
     public init(
         word: String,
         start: Double,
         end: Double,
-        confidence: Float,
-        speakerId: String? = nil
+        confidence: Float? = nil,
+        speakerId: String? = nil,
+        logProbability: Double? = nil,
+        speakerConfidence: Float? = nil
     ) {
         self.word = word
         self.start = start
         self.end = end
         self.confidence = confidence
         self.speakerId = speakerId
+        self.logProbability = logProbability
+        self.speakerConfidence = speakerConfidence
     }
 
     public init(wordTiming: WordTiming, speakerId: String? = nil) {
@@ -349,6 +355,8 @@ public struct AttributedWordTiming: Sendable, Equatable {
         self.end = wordTiming.end
         self.confidence = wordTiming.confidence
         self.speakerId = speakerId
+        self.logProbability = nil
+        self.speakerConfidence = nil
     }
 
     public func dictionaryValue() -> [String: Any] {
@@ -356,7 +364,9 @@ public struct AttributedWordTiming: Sendable, Equatable {
             "word": word,
             "start": start,
             "end": end,
-            "confidence": confidence,
+            "confidence": confidence ?? NSNull(),
+            "logProbability": logProbability ?? NSNull(),
+            "speakerConfidence": speakerConfidence ?? NSNull(),
             "speakerId": speakerId ?? NSNull()
         ]
     }
@@ -506,39 +516,50 @@ public struct SpeechTiming: Sendable, Equatable {
     }
 }
 
-public struct AnnotationOutput: Sendable, Equatable {
+public struct AnnotationOutput: Codable, Sendable, Equatable {
     public let modelId: String
     public let text: String?
     public let elapsedMs: Int
     public let metrics: AnnotationMetrics
     public let words: [AttributedWordTiming]
     public let speakers: [SpeakerSegment]
+    public let providerId: String?
+    public let providerRequestId: String?
+    public let providerModelIds: [String]
+    public let duration: Double?
+    public let durationSource: String?
+    public let language: String?
+    public let languageConfidence: Float?
+    public let languages: [String]
+    public let audioEvents: [AnnotationAudioEvent]
+    public let speakerSegmentsSource: String?
+    public let unsupportedFields: [String]
+    public let unavailableFields: [String]
 
-    public init(
-        modelId: String,
-        text: String? = nil,
-        elapsedMs: Int,
-        metrics: AnnotationMetrics,
-        words: [AttributedWordTiming] = [],
-        speakers: [SpeakerSegment] = []
-    ) {
-        self.modelId = modelId
-        self.text = text
-        self.elapsedMs = elapsedMs
-        self.metrics = metrics
-        self.words = words
-        self.speakers = speakers
+    public init(modelId: String, text: String? = nil, elapsedMs: Int, metrics: AnnotationMetrics,
+                words: [AttributedWordTiming] = [], speakers: [SpeakerSegment] = [],
+                providerId: String? = nil, providerRequestId: String? = nil, providerModelIds: [String] = [],
+                duration: Double? = nil, durationSource: String? = nil,
+                language: String? = nil, languageConfidence: Float? = nil, languages: [String] = [],
+                audioEvents: [AnnotationAudioEvent] = [], speakerSegmentsSource: String? = nil,
+                unsupportedFields: [String] = [], unavailableFields: [String] = []) {
+        self.modelId = modelId; self.text = text; self.elapsedMs = elapsedMs; self.metrics = metrics
+        self.words = words; self.speakers = speakers; self.providerId = providerId
+        self.providerRequestId = providerRequestId; self.providerModelIds = providerModelIds; self.duration = duration; self.durationSource = durationSource
+        self.language = language; self.languageConfidence = languageConfidence; self.languages = languages
+        self.audioEvents = audioEvents; self.speakerSegmentsSource = speakerSegmentsSource
+        self.unsupportedFields = unsupportedFields; self.unavailableFields = unavailableFields
     }
-
     public func dictionaryValue() -> [String: Any] {
-        [
-            "modelId": modelId,
-            "text": text ?? NSNull(),
-            "elapsedMs": elapsedMs,
-            "metrics": metrics.dictionaryValue(),
-            "words": words.map { $0.dictionaryValue() },
-            "speakers": speakers.map { $0.dictionaryValue() }
-        ]
+        ["modelId": modelId, "text": text ?? NSNull(), "elapsedMs": elapsedMs,
+         "metrics": metrics.dictionaryValue(), "words": words.map { $0.dictionaryValue() },
+         "speakers": speakers.map { $0.dictionaryValue() }, "providerId": providerId ?? NSNull(),
+         "providerRequestId": providerRequestId ?? NSNull(), "providerModelIds": providerModelIds, "duration": duration ?? NSNull(),
+         "durationSource": durationSource ?? NSNull(), "language": language ?? NSNull(),
+         "languageConfidence": languageConfidence ?? NSNull(), "languages": languages,
+         "audioEvents": audioEvents.map { $0.dictionaryValue() },
+         "speakerSegmentsSource": speakerSegmentsSource ?? NSNull(),
+         "unsupportedFields": unsupportedFields, "unavailableFields": unavailableFields]
     }
 }
 

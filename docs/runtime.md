@@ -56,9 +56,103 @@ The same grouping runs after long-file chunk merging.
 
 ## File Annotation
 
-`annotate.file` is the file-first speaker annotation route. It accepts an audio path plus optional transcript text and word timings, and returns speaker segments, speaker-attributed words, and annotation metrics.
+`annotate.file` uploads a finalized media file to an explicitly selected cloud
+annotation model. The default `AnnotationManager` now routes these IDs:
 
-The route is scaffolded now so evaluation harnesses and future diarization backends can share one contract even before the default annotation backend lands.
+| Vox model ID | Vendor model | Request credential | Audio events |
+|---|---|---|---|
+| `elevenlabs:scribe_v2` | `scribe_v2` | `ELEVENLABS_API_KEY` | Supported |
+| `deepgram:nova-3` | `nova-3`, diarization `v2` | `DEEPGRAM_API_KEY` | Unsupported |
+
+Call `annotation.models` for capability metadata. Inventory does not authenticate
+an account. There is no implicit cloud default, ambient credential lookup, native
+ASR fallback, or cross-request account cache. The old `speaker-diarization:v1`
+placeholder errors with `annotation_model_required`. Native dictation and batch
+ASR remain separate from these cloud file providers.
+
+The authenticated private JSON-RPC request is:
+
+```json
+{
+  "method": "annotate.file",
+  "params": {
+    "clientId": "meeting-app",
+    "path": "/path/to/finalized-meeting.wav",
+    "modelId": "elevenlabs:scribe_v2",
+    "credentials": {"ELEVENLABS_API_KEY": "<request-scoped-key>"},
+    "diarize": true,
+    "tagAudioEvents": true,
+    "languageCode": "eng",
+    "numSpeakers": 2
+  }
+}
+```
+
+`diarize` defaults to true. `tagAudioEvents` defaults to true for Scribe and false
+for Deepgram; explicitly requesting Deepgram events errors before upload.
+`languageCode` is optional: Scribe accepts ISO 639-1/639-3 codes; Deepgram accepts
+language/region codes or `multi`. It is a hint, never reported as detected language
+unless the vendor actually returns it. `numSpeakers` is a Scribe-only 1–32 hint
+and requires diarization. Cloud providers reject supplied `text`/`words` alignment
+hints. Custom injected providers can still implement that legacy contract.
+
+`VoxDaemonClient.listAnnotationModels()` returns `[AnnotationModelInfo]`.
+`annotateFile(path:modelId:credentials:diarize:tagAudioEvents:languageCode:numSpeakers:timeout:)`
+returns `AnnotationOutput`; its timeout defaults to 3600 seconds. Both methods
+remain in the model-free `VoxClient` product. The TypeScript companion client
+exposes `listAnnotationModels()` and `annotateFile(path, options)` with an explicit
+`modelId`, optional `credentials`, these same options and `timeoutMs`.
+
+### Annotation evidence and limits
+
+- Word and event times are seconds from the file start. Missing or invalid word
+  times fail, rather than becoming zero. Speaker IDs remain vendor IDs: Scribe
+  strings are unchanged; Deepgram integers become decimal strings such as `"0"`.
+- `words.confidence` and `words.speakerConfidence` are nullable. Scribe supplies
+  raw `logProbability`, not a calibrated confidence; Vox does not exponentiate it.
+  Deepgram preserves returned word and speaker confidence. Missing scores stay null.
+- `audioEvents` contains Scribe's timed `audio_event` labels, separate from speech
+  words. Vox ignores spacing tokens. Deepgram has no supported audio-event output.
+- Scribe speaker spans derive from contiguous attributed words. Deepgram uses
+  returned utterance spans, or derives spans from words when absent.
+  `speakerSegmentsSource` distinguishes `vendor-utterances` and `word-span-derived`.
+  Derived spans have no invented confidence; utterance transcription confidence
+  is not speaker confidence. These spans are not acoustic VAD or speaker identity.
+- `language`, `languageConfidence`, `languages`, `providerRequestId` and
+  `providerModelIds` preserve vendor evidence. Missing IDs stay null/empty, not
+  locally generated vendor identifiers. `unsupportedFields` names provider limits;
+  `unavailableFields` names supported fields absent from this response.
+- `duration` uses vendor duration, else readable local media metadata;
+  `durationSource` is `vendor` or `media-file`. Neither is asserted to be billed
+  duration. Unknown duration errors with `annotation_duration_unavailable` rather
+  than inventing zero or using the last word's end.
+- Vox limits input to 2,000,000,000 bytes and two active annotation requests. An
+  additional request errors busy. Upload preparation copies in 64 KiB chunks to an
+  owner-only temporary file, removed on completion/error/cancellation. No upload
+  or response cache is kept. Successful performance samples contain routing and
+  stage metrics, not keys, media, transcript text or vendor responses.
+- HTTP responses are bounded to 4 MiB and encoded results to 8 MiB. Excess fails
+  explicitly. Redirects are refused; Vox does not implement retries. HTTP errors
+  expose status only, never vendor error bodies that could echo credentials.
+- Cancel a Swift client task or disconnect its client to cancel that connection's
+  in-flight uploads and response waits. Other clients are unaffected. No per-file
+  cancel RPC or vendor cancellation guarantee exists. Already accepted vendor work
+  can continue or incur charges. Upload and vendor retention require user consent;
+  Vox does not promise the vendor's zero-retention mode or modify account settings.
+
+The provider runs in Swift inside `voxd`, not a new external ASR process provider.
+It implements the existing native annotation contract and does not introduce a
+Python, MLX, FluidAudio, or Rust process in the native dictation path.
+Host-only `VOX_ANNOTATION_ELEVENLABS_URL` and `VOX_ANNOTATION_DEEPGRAM_URL` can
+override complete endpoints for testing/deployment. They accept HTTPS, or HTTP
+loopback only, without URL credentials, queries or fragments. Invalid explicit
+overrides fail closed. Clients cannot set these endpoints over RPC. A host owner
+who overrides an endpoint controls where that provider's request key is sent.
+
+Contract sources: [Scribe conversion API](https://elevenlabs.io/docs/api-reference/speech-to-text/convert)
+and [Deepgram prerecorded API](https://developers.deepgram.com/reference/speech-to-text/listen-pre-recorded).
+Fixture tests validate routing and schema preservation, not paid-account access,
+real audio accuracy, vendor retention or production vendor availability.
 
 ## Synthesis
 
@@ -257,7 +351,7 @@ catalog fields without a parallel schema. `nativeStreamingStatus()` returns
 `cancelPCMStream(sessionId:)` discards the session without a transcript.
 
 Use `call(_:params:timeout:onProgress:)` for other existing routes, including
-warmup, annotation and TTS. It always supplies the client's stable `clientId`.
+warmup and TTS. It always supplies the client's stable `clientId`.
 Progress callbacks receive `VoxRPCProgress` and run on the client actor; dispatch
 UI changes to the main actor. Install defaults to a 30-minute request budget;
 preload and file transcription default to 5 minutes, and other methods default
@@ -277,11 +371,10 @@ Reconnect explicitly and start a new session. App error paths must disconnect or
 cancel their owned session; abandoning an awaiting task without cancelling it is
 not cancellation.
 
-This client does not add capability negotiation, VAD events, confirmed-word
-boundaries, dictionary hints, download deletion/cancellation, or language result
-fields. It exposes the existing daemon contract, including its 120-second native
-stream limit. `annotate.file` remains a file-first scaffold, not a guarantee of an
-installed diarization backend. TTS cancellation uses synthesis sessions; raw
+This client does not add VAD events, confirmed-word boundaries, dictionary hints,
+download deletion/cancellation, or native ASR language result fields. It exposes
+the 120-second native stream limit. Annotation has its own explicit cloud model
+inventory, language evidence, credentials and limits described above. TTS cancellation uses synthesis sessions; raw
 `synthesize.generate` does not have a per-request cancel RPC.
 
 ### Private runtime discovery

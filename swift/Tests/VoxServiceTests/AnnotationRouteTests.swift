@@ -111,6 +111,8 @@ struct AnnotationRouteTests {
             "path": audioURL.path,
             "modelId": "speaker-diarization:v1",
             "clientId": "talkie",
+            "credentials": ["ELEVENLABS_API_KEY": " scoped-fixture ", "OTHER": "ignored"],
+            "diarize": false, "tagAudioEvents": true, "languageCode": "eng", "numSpeakers": 2,
             "text": "hello there",
             "words": [
                 [
@@ -129,6 +131,9 @@ struct AnnotationRouteTests {
         ])
 
         let capturedRequest = await provider.lastRequest()
+        #expect(capturedRequest?.providerCredentials == ["ELEVENLABS_API_KEY": "scoped-fixture"])
+        #expect(capturedRequest?.diarize == false && capturedRequest?.tagAudioEvents == true)
+        #expect(capturedRequest?.languageCode == "eng" && capturedRequest?.numSpeakers == 2)
         #expect(capturedRequest?.url == audioURL)
         #expect(capturedRequest?.modelId == "speaker-diarization:v1")
         #expect(capturedRequest?.transcription?.text == "hello there")

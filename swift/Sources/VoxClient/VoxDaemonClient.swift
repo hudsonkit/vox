@@ -180,6 +180,26 @@ public actor VoxDaemonClient {
     public func cancelPCMStream(sessionId: String) async throws {
         _ = try await call("transcribe.stream.cancel", params: ["sessionId": .string(sessionId)])
     }
+    public func listAnnotationModels() async throws -> [AnnotationModelInfo] {
+        struct Inventory: Decodable { let models: [AnnotationModelInfo] }
+        let result: Inventory = try await call("annotation.models").decode()
+        return result.models
+    }
+
+    /// Explicit cloud upload. Keys live only in this request; cancellation disconnects
+    /// this client, aborting its HTTP upload, but cannot undo vendor processing/billing.
+    public func annotateFile(path: String, modelId: String, credentials: [String: String],
+                             diarize: Bool = true, tagAudioEvents: Bool? = nil,
+                             languageCode: String? = nil, numSpeakers: Int? = nil,
+                             timeout: Duration = .seconds(3600)) async throws -> AnnotationOutput {
+        var params: [String: JSONValue] = ["path": .string(path), "modelId": .string(modelId),
+            "credentials": .object(credentials.mapValues(JSONValue.string)), "diarize": .bool(diarize)]
+        if let tagAudioEvents { params["tagAudioEvents"] = .bool(tagAudioEvents) }
+        if let languageCode { params["languageCode"] = .string(languageCode) }
+        if let numSpeakers { params["numSpeakers"] = .number(Double(numSpeakers)) }
+        return try await call("annotate.file", params: params, timeout: timeout).decode()
+    }
+
     public func transcribeFile(path: String, modelId: String = "parakeet:v3") async throws -> JSONValue {
         try await call("transcribe.file", params: ["path": .string(path), "modelId": .string(modelId)], timeout: .seconds(300))
     }

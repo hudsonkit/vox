@@ -23,6 +23,7 @@ public final class VoxRuntimeService: @unchecked Sendable {
     private let startedAt = Date()
     private let preferencesLoader: @Sendable () -> VoxPreferences
     private let defaultSynthesisModelId: String
+    private let annotationTasks = ConnectionRequestTasks()
     private let inFlightSynthesisLock = NSLock()
     private var inFlightSynthesisGenerates: [String: [String: Task<Void, Never>]] = [:]
 
@@ -87,6 +88,7 @@ public final class VoxRuntimeService: @unchecked Sendable {
     }
 
     public func stop() {
+        annotationTasks.cancelAll()
         bridge.stop()
         Task { await streamingSessions.shutdown() }
         if socketPath != nil { privateRegistration?.invalidate(); privateRegistration = nil }
@@ -235,7 +237,12 @@ public final class VoxRuntimeService: @unchecked Sendable {
             modelId: modelId,
             clientId: clientId,
             text: text,
-            words: words
+            words: words,
+            providerCredentials: AnnotationLentCredentials.parse(from: params),
+            diarize: params?["diarize"] as? Bool ?? true,
+            tagAudioEvents: params?["tagAudioEvents"] as? Bool,
+            languageCode: params?["languageCode"] as? String,
+            numSpeakers: params?["numSpeakers"] as? Int
         )
     }
 
@@ -244,17 +251,20 @@ public final class VoxRuntimeService: @unchecked Sendable {
         modelId: String,
         clientId: String,
         text: String?,
-        words: [WordTiming]?
+        words: [WordTiming]?,
+        providerCredentials: [String: String] = [:], diarize: Bool = true,
+        tagAudioEvents: Bool? = nil, languageCode: String? = nil, numSpeakers: Int? = nil
     ) async throws -> AnnotationRouteResult {
         let transcription: AnnotationInputTranscription? = {
-            guard let text else { return nil }
-            return AnnotationInputTranscription(text: text, words: words ?? [])
+            guard text != nil || words != nil else { return nil }
+            return AnnotationInputTranscription(text: text ?? "", words: words ?? [])
         }()
 
         let request = AnnotationRequest(
             url: URL(fileURLWithPath: path),
             modelId: modelId,
-            transcription: transcription
+            transcription: transcription, providerCredentials: providerCredentials,
+            diarize: diarize, tagAudioEvents: tagAudioEvents, languageCode: languageCode, numSpeakers: numSpeakers
         )
         let output = try await annotationEngine.annotate(request: request)
         let sample = PerformanceSample(
@@ -970,41 +980,45 @@ public final class VoxRuntimeService: @unchecked Sendable {
             }
         }
 
+        bridge.handle("annotation.models") { [weak self] _, reply in
+            guard let self else { return }
+            Task { reply(["models": await self.annotationEngine.models().map { $0.dictionaryValue() }], nil) }
+        }
+
         bridge.handle("annotate.file") { [weak self] params, reply in
             guard let self else { return }
             let path = params?["path"] as? String
             let modelId = (params?["modelId"] as? String) ?? "speaker-diarization:v1"
             let clientId = (params?["clientId"] as? String) ?? "unknown"
+            let connectionID = (params?["_connectionID"] as? String) ?? "unknown"
             let text = params?["text"] as? String
             let words = self.parseAnnotationWords(params?["words"] as? [[String: Any]])
-            Task {
+            let credentials = AnnotationLentCredentials.parse(from: params)
+            let diarize = params?["diarize"] as? Bool ?? true
+            let events = params?["tagAudioEvents"] as? Bool
+            let language = params?["languageCode"] as? String
+            let speakers = params?["numSpeakers"] as? Int
+            let (id, ticket) = self.annotationTasks.reserve(connectionID: connectionID)
+            let task = Task {
+                defer { self.annotationTasks.finish(connectionID: connectionID, id: id, ticket: ticket) }
                 do {
-                    guard let path else {
-                        throw NSError(domain: "VoxService", code: 1, userInfo: [
-                            NSLocalizedDescriptionKey: "Missing path"
-                        ])
-                    }
-                    let result = try await self.performAnnotateFile(
-                        path: path,
-                        modelId: modelId,
-                        clientId: clientId,
-                        text: text,
-                        words: words
-                    )
+                    try Task.checkCancellation()
+                    guard let path else { throw RemoteAnnotationError.invalidFile }
+                    let result = try await self.performAnnotateFile(path: path, modelId: modelId,
+                        clientId: clientId, text: text, words: words, providerCredentials: credentials,
+                        diarize: diarize, tagAudioEvents: events, languageCode: language, numSpeakers: speakers)
+                    try Task.checkCancellation()
                     await self.performance.record(result.performanceSample)
                     reply(result.output.dictionaryValue(), nil)
                 } catch {
-                    await self.performance.record(PerformanceSample(
-                        clientId: clientId,
-                        route: "annotate.file",
-                        modelId: modelId,
-                        outcome: "error",
-                        textLength: 0,
-                        error: error.localizedDescription
-                    ))
-                    reply(nil, error.localizedDescription)
+                    let cancelled = error is CancellationError || Task.isCancelled
+                    let message = cancelled ? "annotation_cancelled:connection_closed" : error.localizedDescription
+                    await self.performance.record(PerformanceSample(clientId: clientId, route: "annotate.file",
+                        modelId: modelId, outcome: cancelled ? "cancelled" : "error", textLength: 0, error: message))
+                    reply(nil, message)
                 }
             }
+            ticket.attach(task)
         }
 
         bridge.handle("synthesize.voices") { [weak self] params, reply in
@@ -1664,6 +1678,7 @@ public final class VoxRuntimeService: @unchecked Sendable {
     }
 
     private func handleDisconnect(connectionID: String) async {
+        annotationTasks.cancel(connectionID: connectionID)
         cancelInFlightSynthesisGenerates(connectionID: connectionID)
 
         if let session = sessions.finish(connectionID: connectionID) {

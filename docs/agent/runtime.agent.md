@@ -52,7 +52,7 @@
 - Progress VoxRPCProgress callback must return promptly; UI work goes to MainActor. Install timeout 1800 s; preload/file default 300 s; preloadModel(_:timeout:onProgress:) permits an explicit cold-readiness budget, e.g. 600 s; other calls 30 s.
 - One typed append/finish in flight per session; 64 pending RPC limit; 16 MiB messages/32 MiB Unix queued output. Cancel remains callable during append/finish.
 - Request task cancellation/timeout closes connection and fails all pending calls, never retries uncertain work; not a server download-cancel capability. Explicit reconnect starts a new session.
-- No new capability negotiation, VAD, confirmed boundaries, hints, model delete/download cancellation, language field, or streaming diarization. File annotation requires a backend; one-shot generate has disconnect cancellation, not a per-request cancel RPC.
+- No new capability negotiation, VAD, confirmed boundaries, hints, model delete/download cancellation, language field, or streaming diarization. File annotation uses explicit request-authenticated Scribe/Deepgram cloud models; one-shot generate has disconnect cancellation, not a per-request cancel RPC.
 
 ## Private capability discovery
 
@@ -69,3 +69,15 @@
 - Private publication checks prior owner PID before replacing legacy 0644 metadata: live PID blocks startup and rolls back listener; only a stale same-user record can upgrade to 0600 capability. Malformed/unsafe metadata fails. Never hand-write a token/chmod an active legacy record as a workaround. Operator stops/reconfigures the existing host deliberately; isolated tests use their own VOX_HOME/runtime path.
 
 - Native Parakeet batch words now group SentencePiece/whitespace-delimited pieces, punctuation attached. Older revisions returned BPE pieces. Start/end=min/max contributing token intervals, confidence=min piece score; 80 ms decoder-frame estimates, not forced alignment/calibrated word posterior. Multiword pieces share source interval; missing vocab skipped, malformed alignment arrays return no timings. Grouping runs after long-file chunk merge.
+
+## Cloud file annotation
+
+- `annotation.models` inventory, `annotate.file` upload; explicit `elevenlabs:scribe_v2` / `deepgram:nova-3`, no cloud default. Default AnnotationManager is RemoteAnnotationProvider; old placeholder errors.
+- `credentials.ELEVENLABS_API_KEY` / `DEEPGRAM_API_KEY` apply to one request only. No ambient fallback, account cache or global mutation. Same private capability and VoxClient, no engine dependency. Never log keys.
+- `listAnnotationModels()` -> [AnnotationModelInfo]; `annotateFile(path:modelId:credentials:diarize:tagAudioEvents:languageCode:numSpeakers:timeout:)` -> AnnotationOutput, default 3600 s. Cancel disconnects and aborts own uploads; cannot undo vendor work/billing.
+- `diarize` defaults true. Scribe events default true; numSpeakers 1–32 requires diarize. Deepgram events/count hints error before upload. Optional languageCode is not echoed as detected language. Cloud providers reject text/words alignment hints.
+- Words have nullable confidence/logProbability/speakerConfidence. Scribe preserves logprob, no exponentiation; Deepgram preserves scores. Scribe speaker IDs unchanged; Deepgram integers become decimal strings. Missing times error. Events separate from speech; spacing ignored.
+- Scribe speaker spans: word-span-derived; Deepgram: vendor-utterances else word-span-derived. No invented aggregate confidence or acoustic VAD. Duration vendor else actual media metadata, source explicit, otherwise error. No fake vendor IDs/language. unsupportedFields vs unavailableFields distinguish limits from missing response evidence.
+- Two active uploads maximum; overflow errors busy. Input <=2,000,000,000 B, disk-streamed in 64 KiB chunks to 0700 dir/0600 file then removed. Response <=4 MiB, result <=8 MiB. Ephemeral HTTP, no caches/cookies/auth storage, no redirects/application retries. HTTP errors expose status only. Vendor retention, accuracy and account access unverified.
+- Host-only complete endpoint overrides `VOX_ANNOTATION_ELEVENLABS_URL` / `VOX_ANNOTATION_DEEPGRAM_URL`: HTTPS or loopback HTTP, no query/fragment/userinfo. Invalid override fails closed. Never client-controlled.
+- Integration: `xcrun swift build --package-path swift --product voxd`; `python3 scripts/test-private-annotation.py`. Isolated private daemon, two model-free clients, loopback fixtures only. No paid calls or installed runtime changes. Native ASR unaffected.

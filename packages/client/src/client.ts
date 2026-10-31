@@ -11,6 +11,8 @@ import type {
   PCMStreamingSession,
   StreamingASRUpdate,
   FileAnnotationResult,
+  AnnotationOptions,
+  AnnotationModelInfo,
   FileTranscriptionResult,
   HistoryListOptions,
   HistoryListResult,
@@ -206,40 +208,25 @@ export class VoxClient {
     };
   }
 
-  async annotateFile(
-    path: string,
-    options: {
-      modelId?: string;
-      text?: string;
-      words?: Array<{
-        word: string;
-        start: number;
-        end: number;
-        confidence: number;
-      }>;
-    } = {},
-  ): Promise<FileAnnotationResult> {
-    const modelId = options.modelId ?? "speaker-diarization:v1";
-    const result = await this.transport.call(
-      "annotate.file",
-      {
-        clientId: this.clientId,
-        path,
-        modelId,
-        text: options.text,
-        words: options.words,
-      },
-      STREAM_TIMEOUT_MS,
-    );
+  async listAnnotationModels(): Promise<AnnotationModelInfo[]> {
+    const result = await this.transport.call("annotation.models", { clientId: this.clientId });
+    return (result.models ?? []) as AnnotationModelInfo[];
+  }
 
+  async annotateFile(path: string, options: AnnotationOptions): Promise<FileAnnotationResult> {
+    const { timeoutMs, ...params } = options;
+    const result = await this.transport.call("annotate.file", {
+      ...params, clientId: this.clientId, path,
+    }, timeoutMs ?? 3_600_000);
     return {
-      modelId: String(result.modelId ?? modelId),
+      ...result,
+      modelId: String(result.modelId ?? options.modelId),
       text: typeof result.text === "string" ? result.text : undefined,
       elapsedMs: Number(result.elapsedMs ?? 0),
       metrics: parseAnnotationMetrics(result.metrics, Number(result.elapsedMs ?? 0)),
       words: parseAttributedWordTimings(result.words),
       speakers: parseSpeakerSegments(result.speakers),
-    };
+    } as FileAnnotationResult;
   }
 
   async synthesize(text: string, options: SynthesisOptions = {}): Promise<SynthesisResult> {

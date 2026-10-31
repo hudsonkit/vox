@@ -15,15 +15,24 @@ public struct AnnotationRequest: Sendable, Equatable {
     public let url: URL
     public let modelId: String
     public let transcription: AnnotationInputTranscription?
+    public let providerCredentials: [String: String]
+    public let diarize: Bool
+    public let tagAudioEvents: Bool?
+    public let languageCode: String?
+    public let numSpeakers: Int?
 
     public init(
         url: URL,
         modelId: String,
-        transcription: AnnotationInputTranscription? = nil
+        transcription: AnnotationInputTranscription? = nil,
+        providerCredentials: [String: String] = [:], diarize: Bool = true,
+        tagAudioEvents: Bool? = nil, languageCode: String? = nil, numSpeakers: Int? = nil
     ) {
         self.url = url
         self.modelId = modelId
         self.transcription = transcription
+        self.providerCredentials = providerCredentials; self.diarize = diarize
+        self.tagAudioEvents = tagAudioEvents; self.languageCode = languageCode; self.numSpeakers = numSpeakers
     }
 }
 
@@ -39,7 +48,12 @@ public enum AnnotationProviderError: LocalizedError {
 }
 
 public protocol AnnotationProvider: Sendable {
+    func models() async -> [AnnotationModelInfo]
     func annotate(request: AnnotationRequest) async throws -> AnnotationOutput
+}
+
+extension AnnotationProvider {
+    public func models() async -> [AnnotationModelInfo] { [] }
 }
 
 public struct UnavailableAnnotationProvider: AnnotationProvider {
@@ -59,9 +73,11 @@ public struct UnavailableAnnotationProvider: AnnotationProvider {
 public actor AnnotationManager {
     private let provider: any AnnotationProvider
 
-    public init(provider: any AnnotationProvider = UnavailableAnnotationProvider()) {
+    public init(provider: any AnnotationProvider = RemoteAnnotationProvider()) {
         self.provider = provider
     }
+
+    public func models() async -> [AnnotationModelInfo] { await provider.models() }
 
     public func annotate(request: AnnotationRequest) async throws -> AnnotationOutput {
         try await provider.annotate(request: request)

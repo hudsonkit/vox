@@ -21,3 +21,5 @@
 - 1–16000 finite mono 16 kHz samples; await each packet acknowledgement; no uncertain retries; cumulative text + approximate word timestamps + endpointSource.
 
 - listVoices(modelId, credentials?) forwards selected-account credentials on that call only; explicit model required with keys. ElevenLabs dynamic voices and OpenAI static catalog support this; other unsupported providers error. Never log credentials; inventory availability stays daemon-configured, not borrowed-account state.
+
+- listAnnotationModels + annotateFile(path, AnnotationOptions) with required explicit modelId, scoped credentials.ELEVENLABS_API_KEY / DEEPGRAM_API_KEY, diarize/tagAudioEvents/languageCode/numSpeakers; timeoutMs default3600000. Nullable confidence, raw logProbability, speakerConfidence; preserve audioEvents, language/duration/provenance and unsupported/unavailable fields. See runtime brief. TS transport remains TCP-only.

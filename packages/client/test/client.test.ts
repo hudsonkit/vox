@@ -148,7 +148,7 @@ describe("VoxClient", () => {
     });
   });
 
-  it("uses the streaming timeout budget for annotation and parses speaker output", async () => {
+  it("uses the explicit cloud annotation timeout budget and parses speaker output", async () => {
     const calls: Array<{ method: string; params: Record<string, unknown>; timeoutMs: number }> = [];
     const client = new VoxClient({ clientId: "test-client" }) as unknown as {
       transport: {
@@ -182,6 +182,7 @@ describe("VoxClient", () => {
     };
 
     const result = await client.annotateFile("/tmp/sample.wav", {
+      modelId: "speaker-diarization:v1",
       text: "hello world",
       words: [
         { word: "hello", start: 0.01, end: 0.2, confidence: 0.98 },
@@ -204,7 +205,7 @@ describe("VoxClient", () => {
             { word: "hello", start: 0.01, end: 0.2, confidence: 0.98 },
           ],
         },
-        timeoutMs: STREAM_TIMEOUT_MS,
+        timeoutMs: 3_600_000,
       },
     ]);
   });
