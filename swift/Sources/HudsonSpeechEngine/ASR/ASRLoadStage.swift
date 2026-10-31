@@ -4,6 +4,27 @@ import VoxCore
 /// Instrument public Core ML load/plan phases separately. Never include URL paths,
 /// request audio/text, credentials or untrusted underlying error descriptions.
 struct ASRLoadStage {
+    /// Domain names are allowlisted, not reflected. Error userInfo/descriptions can
+    /// contain model paths, input text or credentials and must never enter logs.
+    struct Failure: Sendable, Equatable {
+        let domain: String
+        let code: Int
+
+        static func summarize(_ error: Error) -> [Failure] {
+            var result: [Failure] = []
+            var current: NSError? = error as NSError
+            // Bounded even when an external NSError has a cyclic underlying chain.
+            for _ in 0..<3 {
+                guard let value = current else { break }
+                let domains = [NSCocoaErrorDomain, NSPOSIXErrorDomain, NSOSStatusErrorDomain,
+                               NSURLErrorDomain, "com.apple.CoreML"]
+                result.append(Failure(domain: domains.contains(value.domain) ? value.domain : "other", code: value.code))
+                current = value.userInfo[NSUnderlyingErrorKey] as? NSError
+            }
+            return result
+        }
+    }
+
     struct Event: Sendable, Equatable {
         let modelId: String
         let component: String
@@ -11,6 +32,7 @@ struct ASRLoadStage {
         let state: String
         let attempt: Int
         let elapsedMs: Int
+        var failures: [Failure] = []
     }
 
     private let modelId: String
@@ -38,7 +60,7 @@ struct ASRLoadStage {
             finish("completed")
             return result
         } catch {
-            finish("failed")
+            finish("failed", error: error)
             throw error
         }
     }
@@ -49,18 +71,22 @@ struct ASRLoadStage {
             finish("completed")
             return result
         } catch {
-            finish("failed")
+            finish("failed", error: error)
             throw error
         }
     }
 
-    private func finish(_ state: String) {
+    private func finish(_ state: String, error: Error? = nil) {
         let elapsed = started.duration(to: .now).components
         let ms = Int(elapsed.seconds) * 1000 + Int(elapsed.attoseconds / 1_000_000_000_000_000)
-        observe(Event(modelId: modelId, component: component, phase: phase, state: state, attempt: attempt, elapsedMs: ms))
+        observe(Event(modelId: modelId, component: component, phase: phase, state: state, attempt: attempt, elapsedMs: ms,
+                      failures: error.map(Failure.summarize) ?? []))
     }
 
     private static func log(_ event: Event) {
         VoxLog.engine.info("CoreML load stage model=\(event.modelId) component=\(event.component) phase=\(event.phase) state=\(event.state) attempt=\(event.attempt) elapsedMs=\(event.elapsedMs)")
+        for (depth, failure) in event.failures.enumerated() {
+            VoxLog.engine.info("CoreML stage failure model=\(event.modelId) component=\(event.component) phase=\(event.phase) attempt=\(event.attempt) depth=\(depth) errorDomain=\(failure.domain) errorCode=\(failure.code)")
+        }
     }
 }

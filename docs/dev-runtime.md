@@ -125,6 +125,16 @@ again. It does not install, pin a second model or treat cached warmup history as
 readiness. The separate `vox-asr-bench lifecycle` diagnostic additionally tests
 public embedded explicit unload and idle unload, using the same production models.
 
+## Measured reload behavior
+
+The [2026-10-31 native verification report](reports/native-dev-reload-2026-10-31.md)
+records actual explicit and idle unload/reload with inference. It also records
+unresolved slow Unified preparation and a separate normal dev-host compute-plan
+failure. Do not treat the resource budget or 900-second retention as a cache fix.
+Core ML stage failures include at most three allowlisted error domains/numeric
+codes; raw error descriptions, arbitrary domains and userInfo are not logged.
+Coordinate native compiler work with other dev hosts before measuring reload.
+
 ## Resource admission
 
 On macOS, encoder loading, compute-plan loading and first-use priming require a

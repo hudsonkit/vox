@@ -1673,6 +1673,16 @@ again. It does not install, pin a second model or treat cached warmup history as
 readiness. The separate `vox-asr-bench lifecycle` diagnostic additionally tests
 public embedded explicit unload and idle unload, using the same production models.
 
+## Measured reload behavior
+
+The [2026-10-31 native verification report](reports/native-dev-reload-2026-10-31.md)
+records actual explicit and idle unload/reload with inference. It also records
+unresolved slow Unified preparation and a separate normal dev-host compute-plan
+failure. Do not treat the resource budget or 900-second retention as a cache fix.
+Core ML stage failures include at most three allowlisted error domains/numeric
+codes; raw error descriptions, arbitrary domains and userInfo are not logged.
+Coordinate native compiler work with other dev hosts before measuring reload.
+
 ## Resource admission
 
 On macOS, encoder loading, compute-plan loading and first-use priming require a
@@ -3838,6 +3848,8 @@ Source: docs/agent/dev-runtime.agent.md
 - Batch Parakeet v3, live Unified560ms, strict ANE plan check, one native slot. cycle verifies real idle eviction and post-idle inference; vox-asr-bench lifecycle also uses public embedded explicit unload. No fake/injected model runtime or automatic model install.
 - Preparation rejects insufficient temporary-volume disk/critical pressure before encoder load, compute plan and priming. macOS default reserve3GiB; mobile default0 pending measurements. VOX_ASR_MIN_FREE_DISK_BYTES configures; dev run --minimum-free-disk-bytes N. Budget is policy, not a Core ML minimum/cache guarantee. No cache deletion or CPU fallback.
 - Failed Parakeet priming no longer reports ready. Failed temporary batch/live models are released before residency is released. Timeout/cancel does not prove OS compilation stopped; no automatic replay.
+
+- Reload evidence: docs/reports/native-dev-reload-2026-10-31.md. Real release idle60 inference passed both, but Unified reload49.698s and separate normal dev-host plan failure remain unresolved; no cache-reuse fix/own-voice acceptance claim. Stage failure diagnostics: max3 allowlisted domains + numeric codes, never raw bodies/paths/arbitrary domains. Coordinate native compiler lane before tests.
 
 # Models and plugin facts
 
