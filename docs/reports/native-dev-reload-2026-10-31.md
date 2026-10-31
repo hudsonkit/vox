@@ -199,6 +199,11 @@ URL control also reloaded quickly, these observations do not establish a shared-
 asset fix. The first two rows alone are additionally confounded by different
 executable/cache namespaces. No asset prototype is promoted or conclusively ruled
 out. Component results do not establish complete ASR or normal-Agent correctness.
+Resource samples also recorded up to one Swift compiler process during the first
+run, none during the shared-asset run and up to two during the URL control. Their
+ownership was not established. Quiet preflight did not guarantee an otherwise
+idle host for the entire run, so cross-row timing is not a controlled API A/B.
+No competing private voxd process was recorded during these component runs.
 
 The first run's cold-like re-specialization therefore does not require Vox's
 lifecycle actor, Agent boot or extra prediction streams. Across that run pressure
