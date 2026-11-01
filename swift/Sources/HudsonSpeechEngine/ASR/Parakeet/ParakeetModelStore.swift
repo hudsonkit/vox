@@ -65,9 +65,9 @@ struct ParakeetModelManifest: Sendable, Equatable {
     static let v3 = ParakeetModelManifest(
         modelId: "parakeet:v3",
         name: "Parakeet TDT v3",
-        repositoryFolderName: "FluidInference/parakeet-tdt-0.6b-v3-coreml",
-        revision: "7dd20fe6b1797d35f5e3307e8b1732d9a178edfe",
-        cacheDirectoryName: "parakeet-tdt-0.6b-v3-7dd20fe",
+        repositoryFolderName: "arach/parakeet-tdt-0.6b-v3-coreml",
+        revision: "743fa35d26213cbc8de1e001bfdc76ed0530abe8",
+        cacheDirectoryName: "parakeet-tdt-0.6b-v3-743fa35",
         requiredModelFiles: [
             "Preprocessor.mlmodelc",
             "Encoder.mlmodelc",
